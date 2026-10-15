@@ -68,6 +68,7 @@ export class AppController {
   confirmState: ConfirmState | null = null;
   findOpen: 'find' | 'replace' | null = null;
   previewOpen = false;
+  aiOpen = false;
   toasts: Toast[] = [];
   busy: string | null = null;
   recent: string[] = [];

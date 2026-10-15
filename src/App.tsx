@@ -11,6 +11,7 @@ import { FindPanel } from './ui/FindPanel';
 import { Dialogs } from './ui/Dialogs';
 import { PreviewModal } from './ui/PreviewModal';
 import { Icon } from './ui/Icon';
+import { AiPanel } from './ui/AiPanel';
 import { baseName } from './formats/common';
 
 export function App() {
@@ -47,6 +48,7 @@ export function App() {
       <BasicToolbar />
       <FormatBar />
       <TabBar />
+      <div className="main-row">
       <div className="work">
         {app.docs.length > 0 && <Ruler />}
         {app.docs.map((d) => (
@@ -54,6 +56,8 @@ export function App() {
         ))}
         {app.docs.length === 0 && <StartScreen />}
         <FindPanel />
+      </div>
+      <AiPanel />
       </div>
       <StatusBar />
       <Dialogs />

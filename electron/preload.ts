@@ -29,6 +29,18 @@ const api = {
   toggleDevtools: () => ipcRenderer.invoke('app:devtools'),
   listFonts: (): Promise<string[]> => ipcRenderer.invoke('fonts:list'),
   convertDoc: (data: Uint8Array): Promise<any> => ipcRenderer.invoke('doc:convert', data),
+  aiKeyStatus: (): Promise<Record<'claude' | 'openai' | 'gemini', 'saved' | 'env' | 'none'>> => ipcRenderer.invoke('ai:key-status'),
+  aiSetKey: (p: string, key: string | null) => ipcRenderer.invoke('ai:set-key', p, key),
+  aiModels: (p: string): Promise<{ ok: boolean; models?: { id: string; label: string }[]; error?: string }> => ipcRenderer.invoke('ai:models', p),
+  aiChat: (req: any) => ipcRenderer.invoke('ai:chat', req),
+  aiAbort: (id: string) => ipcRenderer.invoke('ai:abort', id),
+  onAiEvent: (cb: (ev: any) => void) => {
+    const h = (_e: unknown, ev: any) => cb(ev);
+    ipcRenderer.on('ai:event', h);
+    return () => {
+      ipcRenderer.removeListener('ai:event', h);
+    };
+  },
   onOpenFiles: (cb: (files: string[]) => void) => {
     const h = (_e: unknown, files: string[]) => cb(files);
     ipcRenderer.on('app:open-files', h);

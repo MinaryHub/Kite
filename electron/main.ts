@@ -15,6 +15,9 @@ function filesFromArgv(argv: string[]): string[] {
   return argv.slice(1).filter((a) => !a.startsWith('-') && DOC_EXT.test(a) && fs.existsSync(a));
 }
 
+// 자가 점검 실행은 별도 데이터 폴더를 써서 사용 중인 K-HWP 창과 섞이지 않게 한다
+if (process.env.KHWP_SMOKE) app.setPath('userData', path.join(os.tmpdir(), 'khwp-smoke-' + process.pid));
+
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
@@ -62,7 +65,7 @@ function createWindow() {
       setTimeout(async () => {
         try {
           const r = await mainWindow!.webContents.executeJavaScript(
-            `(() => { const d = [...document.querySelectorAll('.doc-tab .dt-title')].map(e => e.textContent); return JSON.stringify({ tabs: d, pages: document.querySelectorAll('.workspace:not(.hidden-doc) .paper').length, title: document.title, hasApi: !!window.khwp }); })()`,
+            `(async () => { const d = [...document.querySelectorAll('.doc-tab .dt-title')].map(e => e.textContent); const ai = window.khwp ? await window.khwp.aiKeyStatus() : null; return JSON.stringify({ tabs: d, pages: document.querySelectorAll('.workspace:not(.hidden-doc) .paper').length, title: document.title, hasApi: !!window.khwp, ai }); })()`,
           );
           fs.writeFileSync(process.env.KHWP_SMOKE!, 'SMOKE ' + r);
         } catch (e) {
@@ -79,6 +82,13 @@ function createWindow() {
     mainWindow?.webContents.send('app:request-close');
   });
   mainWindow.on('closed', () => (mainWindow = null));
+  // 앱 화면은 다른 주소로 이동하지 않는다 (AI 응답 속 링크 등은 외부 브라우저로)
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    if (url !== mainWindow?.webContents.getURL()) {
+      e.preventDefault();
+      if (/^https?:/.test(url)) shell.openExternal(url);
+    }
+  });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) shell.openExternal(url);
     return { action: 'deny' };
@@ -362,3 +372,27 @@ ipcMain.handle('doc:convert', async (_e, data: Uint8Array) => {
     fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
 });
+
+// ---------------- AI 도우미 ----------------
+import { abortChat, keyStatus, listModels, setKey, startChat, type ChatRequest, type Provider } from './ai';
+
+ipcMain.handle('ai:key-status', () => keyStatus());
+ipcMain.handle('ai:set-key', (_e, p: Provider, key: string | null) => {
+  setKey(p, key);
+  return keyStatus();
+});
+ipcMain.handle('ai:models', async (_e, p: Provider) => {
+  try {
+    return { ok: true, models: await listModels(p) };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message || e) };
+  }
+});
+ipcMain.handle('ai:chat', (e, req: ChatRequest) => {
+  const wc = e.sender;
+  startChat(req, (ev) => {
+    if (!wc.isDestroyed()) wc.send('ai:event', ev);
+  });
+  return true;
+});
+ipcMain.handle('ai:abort', (_e, id: string) => abortChat(id));

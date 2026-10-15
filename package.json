@@ -45,8 +45,9 @@
     },
     "electronDist": "node_modules/electron/dist"
   },
-  "dependencies": {},
   "devDependencies": {
+    "@anthropic-ai/sdk": "^0.134.0",
+    "@google/genai": "^2.30.0",
     "@tiptap/core": "^2.27.3",
     "@tiptap/extension-character-count": "^2.27.3",
     "@tiptap/extension-color": "^2.27.3",
@@ -76,6 +77,7 @@
     "@types/turndown": "^5.0.6",
     "@vitejs/plugin-react": "^6.1.2",
     "cfb": "^1.2.2",
+    "dompurify": "^3.4.17",
     "electron": "^44.7.2",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.28.2",
@@ -83,6 +85,7 @@
     "jszip": "^3.10.2",
     "lucide-react": "^1.57.0",
     "marked": "^18.1.1",
+    "openai": "^7.34.0",
     "pako": "^3.0.2",
     "pdfjs-dist": "^6.4.299",
     "react": "^18.3.1",

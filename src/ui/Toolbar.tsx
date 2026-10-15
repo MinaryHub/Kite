@@ -103,6 +103,8 @@ export function BasicToolbar() {
       <TbBtn id="page.setup" big label="편집 용지" />
       <TbBtn id="page.headerFooter" big label="머리말" />
       <TbBtn id="page.number" big label="쪽 번호" />
+      <div className="tb-sep" />
+      <TbBtn id="tools.ai" big label="AI 도우미" />
     </div>
   );
 }

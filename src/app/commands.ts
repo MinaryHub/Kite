@@ -356,6 +356,7 @@ export const commands: Record<string, Command> = {
     active: () => app.prefs.spellcheck,
   },
   'tools.wordCount': { label: '글자 수 세기...', icon: 'BarChart3', run: () => app.openDialog('docInfo'), enabled: hasDoc },
+  'tools.ai': { label: 'AI 도우미 (Claude·GPT·Gemini)', icon: 'Sparkles', shortcut: 'Ctrl+Shift+A', keys: ['Ctrl+Shift+A'], run: () => app.set({ aiOpen: !app.aiOpen }), active: () => app.aiOpen },
   'tools.prefs': { label: '환경 설정...', icon: 'Settings', run: () => app.openDialog('prefs') },
   'tools.shortcuts': { label: '단축키 목록', icon: 'Keyboard', shortcut: 'Shift+F1', keys: ['Shift+F1'], run: () => app.openDialog('shortcuts') },
   'tools.about': { label: 'K-HWP 정보', icon: 'Info', run: () => app.openDialog('about') },
