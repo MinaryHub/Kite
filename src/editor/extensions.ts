@@ -26,6 +26,7 @@ import {
   KTableCell,
   KTableHeader,
   KeyboardExtras,
+  CellNoWrap,
 } from './extensions/nodes';
 import { Search } from './extensions/search';
 import { Pagination } from './extensions/pagination';
@@ -81,7 +82,7 @@ export function getExtensions(): AnyExtension[] {
 
 /** 편집 화면용 확장 (스키마 + 편집 기능) */
 export function getEditorExtensions(): AnyExtension[] {
-  return [...getExtensions(), KeyboardExtras, Search, CharacterCount, Pagination];
+  return [...getExtensions(), KeyboardExtras, CellNoWrap, Search, CharacterCount, Pagination];
 }
 
 let cachedSchema: Schema | null = null;

@@ -279,8 +279,22 @@ function sortObj(o: Record<string, any>) {
   return out;
 }
 
+/** 기호 글꼴(Wingdings/Symbol)의 사용자 정의 영역 문자 → 표준 유니코드 */
+const SYMBOL_PUA: Record<number, string> = {
+  0xf06c: '●', 0xf06d: '❍', 0xf06e: '■', 0xf06f: '□', 0xf070: '◻', 0xf071: '❑', 0xf072: '❒',
+  0xf073: '⬧', 0xf074: '⧫', 0xf075: '◆', 0xf076: '❖', 0xf077: '⬥', 0xf09f: '•', 0xf0a1: '○',
+  0xf0a4: '◉', 0xf0a7: '▪', 0xf0a8: '◻', 0xf0b7: '•', 0xf0d8: '➢', 0xf0e0: '→', 0xf0e8: '➔',
+  0xf0f0: '⇨', 0xf0fb: '✗', 0xf0fc: '✓', 0xf0fd: '☒', 0xf0fe: '☑', 0xf0b2: '◊',
+};
+
+export function mapSymbols(text: string): string {
+  if (!/[\uf020-\uf0ff]/.test(text)) return text;
+  return text.replace(/[\uf020-\uf0ff]/g, (ch) => SYMBOL_PUA[ch.charCodeAt(0)] || ch);
+}
+
 export function textNode(text: string, marks?: JMark[]): JNode | null {
   if (!text) return null;
+  text = mapSymbols(text);
   const n: JNode = { type: 'text', text };
   if (marks && marks.length) n.marks = marks;
   return n;

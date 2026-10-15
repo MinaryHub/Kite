@@ -621,7 +621,7 @@ class HwpConverter {
     }
     finish();
     const nColsDecl = tbl ? u16(tbl, 6) : 0;
-    const t = assembleTable(cells, nRowsDecl, nColsDecl);
+    const t = assembleTable(cells, nRowsDecl, nColsDecl, hwpToPx(u32(ctrl, 16)));
     if (tbl) t.attrs = { cellPadding: Math.round(hwpToPx((u16(tbl, 10) + u16(tbl, 12)) / 2) * 10) / 10 };
     if (caption && caption.length) (t as any).caption = this.convertParagraphs(caption, true);
     return t;
@@ -678,6 +678,8 @@ export function assembleTable(
   cells: { row: number; col: number; cs: number; rs: number; w: number; node: JNode }[],
   nRowsDecl: number,
   nColsDecl = 0,
+  /** 표 전체 너비(px) — 계산한 너비가 더 크면 이 너비에 맞춤 */
+  tableWidth = 0,
 ): JNode {
   // 잘못된 값 방어: 칸/줄 합치기 범위를 표 크기 안으로 제한
   const maxCols = nColsDecl > 0 ? nColsDecl : 512;
@@ -709,18 +711,54 @@ export function assembleTable(
     .sort((a, b) => a - b)
     .map((r) => ({ type: 'tableRow', content: byRow.get(r)!.sort((a, b) => a.col - b.col).map((c) => c.node) }));
   const nCols = Math.max(1, ...cells.map((c) => c.col + c.cs));
-  const widths: (number | null)[] = new Array(nCols).fill(null);
-  for (const c of cells) if (c.cs === 1 && c.w && widths[c.col] == null) widths[c.col] = c.w;
-  for (const c of [...cells].sort((a, b) => a.cs - b.cs)) {
-    if (c.cs <= 1 || !c.w) continue;
-    const slice = widths.slice(c.col, c.col + c.cs);
-    const unknown = slice.filter((x) => x == null).length;
-    if (!unknown) continue;
-    const known = slice.reduce((a: number, x) => a + (x || 0), 0);
-    const each = Math.max(10, (c.w - known) / unknown);
-    for (let i = c.col; i < c.col + c.cs; i++) if (widths[i] == null) widths[i] = each;
+  // 열 경계 계산: 각 셀의 왼쪽/오른쪽 경계를 전파해 정확한 격자 너비를 구한다
+  const x: (number | null)[] = new Array(nCols + 1).fill(null);
+  x[0] = 0;
+  for (let iter = 0; iter < nCols + 4; iter++) {
+    let changed = false;
+    for (const c of cells) {
+      if (!(c.w > 0)) continue;
+      const a = c.col;
+      const b = c.col + c.cs;
+      if (x[a] != null && x[b] == null) {
+        x[b] = x[a]! + c.w;
+        changed = true;
+      } else if (x[b] != null && x[a] == null) {
+        x[a] = x[b]! - c.w;
+        changed = true;
+      }
+    }
+    if (!changed) break;
   }
-  const finalW = widths.map((x) => Math.min(2000, Math.max(10, Math.round(x || 60))));
+  // 알 수 없는 경계는 앞뒤 값 사이를 고르게 채움
+  for (let i = 1; i <= nCols; i++) {
+    if (x[i] != null) continue;
+    let j = i + 1;
+    while (j <= nCols && x[j] == null) j++;
+    const left = x[i - 1]!;
+    const right = j <= nCols ? x[j]! : left + 60 * (j - i);
+    for (let k = i; k < j; k++) x[k] = left + ((right - left) * (k - i + 1)) / (j - i + 1);
+  }
+  for (let i = 1; i <= nCols; i++) if (x[i]! <= x[i - 1]!) x[i] = x[i - 1]! + 4;
+  let total = x[nCols]!;
+  const scale = tableWidth && total > tableWidth + 1 ? tableWidth / total : 1;
+  const bounds = x.map((v) => Math.round(v! * scale));
+  total = bounds[nCols];
+  const finalW = bounds.slice(1).map((v, i) => Math.max(1, Math.min(2000, v - bounds[i])));
+  // 병합 때문에 생긴 아주 좁은 열(셀 안 여백보다 좁음)은 이웃 열에 합친다
+  for (let k = finalW.length - 1; k >= 0 && finalW.length > 1; k--) {
+    if (finalW[k] >= 8) continue;
+    const covering = cells.filter((c) => c.col <= k && k < c.col + c.cs);
+    if (covering.some((c) => c.cs === 1)) continue;
+    const target = k + 1 < finalW.length ? k + 1 : k - 1;
+    finalW[target] += finalW[k];
+    finalW.splice(k, 1);
+    for (const c of cells) {
+      if (c.col <= k && k < c.col + c.cs) c.cs--;
+      else if (c.col > k) c.col--;
+      c.node.attrs!.colspan = c.cs;
+    }
+  }
   for (const c of cells) c.node.attrs!.colwidth = finalW.slice(c.col, c.col + c.cs);
   return {
     type: 'table',

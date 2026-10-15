@@ -226,24 +226,60 @@ function computeLayout(view: EditorView, g: PageGeometry): { breaks: PageBreakIn
     return lines;
   };
 
+  /**
+   * 줄의 첫 글자 위치. 화면 밖에서도 동작하도록 좌표 대신 글자별 사각형을 이분 탐색한다.
+   * (posAtCoords는 보이는 영역에서만 동작해 화면 밖 문단을 나누지 못했다)
+   */
   const posAtLineStart = (el: HTMLElement, line: Line, from: number, to: number): number | null => {
-    const er = el.getBoundingClientRect();
-    const midY = rootTop + ((line.top + line.bottom) / 2) * s;
-    const res = view.posAtCoords({ left: er.left + 1, top: midY });
-    if (!res) return null;
-    let p = res.pos;
-    for (let tries = 0; tries < 3; tries++) {
-      if (p <= from || p >= to) return null;
-      try {
-        const c = view.coordsAtPos(p, 1);
-        const ct = rel(c.top);
-        if (ct >= line.top - 3) return p;
-      } catch {
-        return null;
-      }
-      p++;
+    const nodes: Text[] = [];
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      // 쪽 나누기 공간(위젯) 안의 글자는 제외
+      if ((n.parentElement as HTMLElement | null)?.closest('.pg-spacer')) continue;
+      if ((n as Text).length) nodes.push(n as Text);
     }
-    return null;
+    const starts: number[] = [];
+    let total = 0;
+    for (const t of nodes) {
+      starts.push(total);
+      total += t.length;
+    }
+    if (!total) return null;
+    const range = document.createRange();
+    const locate = (i: number): [Text, number] => {
+      let lo = 0;
+      let hi = nodes.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (starts[mid] <= i) lo = mid;
+        else hi = mid - 1;
+      }
+      return [nodes[lo], i - starts[lo]];
+    };
+    const topOf = (i: number) => {
+      const [t, o] = locate(i);
+      range.setStart(t, o);
+      range.setEnd(t, Math.min(t.length, o + 1));
+      const rects = range.getClientRects();
+      const r = rects.length ? rects[rects.length - 1] : range.getBoundingClientRect();
+      return rel(r.top);
+    };
+    // line.top 이상에 놓인 첫 글자
+    let lo = 0;
+    let hi = total - 1;
+    if (topOf(hi) < line.top - 2) return null;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (topOf(mid) >= line.top - 2) hi = mid;
+      else lo = mid + 1;
+    }
+    const [t, o] = locate(lo);
+    try {
+      const p = view.posAtDOM(t, o);
+      return p > from && p < to ? p : null;
+    } catch {
+      return null;
+    }
   };
 
   const handleTextblock = (node: PMNode, pos: number) => {
@@ -289,6 +325,79 @@ function computeLayout(view: EditorView, g: PageGeometry): { breaks: PageBreakIn
     }
   };
 
+  /** 셀 안의 말단 블록(문단·중첩 표 등)을 문서 순서로 */
+  const collectLeaves = (parent: PMNode, base: number, out: { node: PMNode; pos: number }[] = []) => {
+    parent.forEach((child, offset) => {
+      const p = base + offset;
+      if (child.isTextblock || child.type.name === 'table') out.push({ node: child, pos: p });
+      else if (CONTAINERS.has(child.type.name)) collectLeaves(child, p + 1, out);
+      else if (child.isBlock) out.push({ node: child, pos: p });
+    });
+    return out;
+  };
+
+  /** 한 쪽보다 긴 표 줄: 각 셀의 내용을 같은 쪽 경계에서 따로 나눈다 */
+  const splitRow = (rowNode: PMNode, rowPos: number, uTop: number, uBottom: number) => {
+    const startTop = uTop + shift;
+    normalize(startTop);
+    markPageStart(rowPos);
+    const startPage = page;
+    const PAD = 3;
+    let rowBottom = uBottom; // 자연 배치 기준 (shift 미포함)
+    rowNode.forEach((cell, off) => {
+      const cellPos = rowPos + 1 + off;
+      let cs = 0;
+      let pc = startPage;
+      let last = -Infinity;
+      for (const lf of collectLeaves(cell, cellPos + 1)) {
+        const el = view.nodeDOM(lf.pos) as HTMLElement | null;
+        if (!(el instanceof HTMLElement)) continue;
+        const r = el.getBoundingClientRect();
+        const top = rel(r.top);
+        const bottom = rel(r.bottom);
+        const sT = top + shift + cs;
+        while (sT >= (pc + 1) * P - 0.5) pc++;
+        if (bottom + shift + cs > pc * P + CH + 0.5) {
+          const lines = lf.node.isTextblock ? getLines(el) : [];
+          if (lines.length >= 2) {
+            for (let li = 0; li < lines.length; li++) {
+              const lt = (li === 0 ? top : (lines[li - 1].bottom + lines[li].top) / 2) + shift + cs;
+              const lb = (li === lines.length - 1 ? bottom : (lines[li].bottom + lines[li + 1].top) / 2) + shift + cs;
+              while (lt >= (pc + 1) * P - 0.5) pc++;
+              if (lb > pc * P + CH + 0.5 && lt > pc * P + 0.5) {
+                const p = li === 0 ? lf.pos : posAtLineStart(el, lines[li], lf.pos, lf.pos + lf.node.nodeSize);
+                if (p != null) {
+                  const h = Math.round(((pc + 1) * P - lt) * 100) / 100;
+                  breaks.push({ pos: p, height: h, kind: li === 0 ? 'block' : 'line' });
+                  cs += h;
+                  pc++;
+                }
+              }
+            }
+          } else if (sT > pc * P + 0.5) {
+            const h = Math.round(((pc + 1) * P - sT) * 100) / 100;
+            breaks.push({ pos: lf.pos, height: h, kind: 'block' });
+            cs += h;
+            pc++;
+          }
+        }
+        last = Math.max(last, bottom + cs);
+      }
+      if (last > -Infinity) rowBottom = Math.max(rowBottom, last + PAD);
+    });
+    // 이 줄이 늘어난 만큼 뒤 내용도 밀린다
+    const extra = rowBottom - uBottom;
+    shift += extra;
+    const endS = uBottom + shift; // = 늘어난 줄의 아래 끝
+    const endPage = Math.min(MAX_PAGES, Math.floor((endS - 0.5) / P));
+    if (endPage > page) {
+      page = endPage;
+      fnUsed = 0;
+      markPageStart(rowPos);
+    }
+    lastBottom = Math.max(lastBottom, endS);
+  };
+
   const handleTable = (node: PMNode, pos: number) => {
     const el = view.nodeDOM(pos) as HTMLElement | null;
     if (!el || !(el instanceof HTMLElement)) return;
@@ -320,6 +429,14 @@ function computeLayout(view: EditorView, g: PageGeometry): { breaks: PageBreakIn
       const rr = row.el.getBoundingClientRect();
       const uTop = i === 0 ? top : rel(rr.top);
       const uBottom = i === rows.length - 1 ? bottom : rel(rr.bottom);
+      // 한글 기본(셀 단위 나눔)처럼, 넘치는 줄은 셀 내용을 쪽 경계에서 나눈다 (짧은 줄은 통째로 넘김)
+      let pp = page;
+      while (uTop + shift >= (pp + 1) * P - 0.5) pp++;
+      if (uBottom + shift > pp * P + CH + 0.5 && uBottom - uTop > 60) {
+        const rowNode = node.child(i);
+        splitRow(rowNode, row.pos, uTop, uBottom);
+        return;
+      }
       const rowFns = collectFootnotes(row.el, pos);
       const fnH = rowFns.reduce((a, f) => a + f.h, 0);
       if (i === 0) place(uTop, uBottom, fnH, () => pos, 'block', pos);

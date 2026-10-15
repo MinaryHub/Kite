@@ -57,8 +57,8 @@ export function fontStack(name: string): string {
   const q = `'${safe}'`;
   if (/D2Coding|Consolas|Courier|Mono|코딩/i.test(name)) return `${q}, D2Coding, Consolas, monospace`;
   return SERIF_RE.test(name)
-    ? `${q}, '함초롬바탕', 'HCR Batang', '휴먼명조', '바탕', Batang, serif`
-    : `${q}, '함초롬돋움', 'HCR Dotum', '맑은 고딕', 'Malgun Gothic', sans-serif`;
+    ? `${q}, '함초롬바탕', 'HCR Batang', '휴먼명조', '바탕', Batang, serif, 'Segoe UI Symbol', Wingdings`
+    : `${q}, '함초롬돋움', 'HCR Dotum', '맑은 고딕', 'Malgun Gothic', sans-serif, 'Segoe UI Symbol', Wingdings`;
 }
 
 export function cssFontFamily(name: string): string {

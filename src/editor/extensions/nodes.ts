@@ -7,7 +7,7 @@ import TableHeader from '@tiptap/extension-table-header';
 import Table, { TableView } from '@tiptap/extension-table';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { NodeSelection, Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
-import type { EditorView } from '@tiptap/pm/view';
+import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import { viewState } from '../viewState';
 
 declare module '@tiptap/core' {
@@ -453,7 +453,7 @@ export const KTable = Table.extend({
       },
     };
   },
-}).configure({ resizable: true, cellMinWidth: 20, lastColumnResizable: true, allowTableNodeSelection: true, View: KTableView as any });
+}).configure({ resizable: true, cellMinWidth: 4, lastColumnResizable: true, allowTableNodeSelection: true, View: KTableView as any });
 
 // ---------------- 탭 키 / 수정(겹쳐쓰기) 모드 ----------------
 const overwriteKey = new PluginKey('overwrite');
@@ -504,6 +504,44 @@ export const KeyboardExtras = Extension.create({
             tr.setSelection(TextSelection.create(tr.doc, from + text.length));
             view.dispatch(tr);
             return true;
+          },
+        },
+      }),
+    ];
+  },
+});
+
+// ---------------- 표 셀 안의 짧은 숫자/영문 낱말 줄바꿈 방지 ----------------
+// 한글과 글꼴 너비가 조금 달라 "08:30" 같은 값이 두 줄로 깨지는 것을 막는다.
+const NOWRAP_RE = /^[\x21-\x7e]{1,10}$/;
+const cellNoWrapKey = new PluginKey<DecorationSet>('cellNoWrap');
+
+function noWrapDecos(doc: PMNode): DecorationSet {
+  const decos: Decoration[] = [];
+  doc.descendants((node, pos, parent) => {
+    if (node.type.name === 'table' || node.type.name === 'tableRow' || node.type.name === 'tableCell' || node.type.name === 'tableHeader') return true;
+    if (node.isTextblock && parent && (parent.type.name === 'tableCell' || parent.type.name === 'tableHeader')) {
+      if (NOWRAP_RE.test(node.textContent.trim())) decos.push(Decoration.node(pos, pos + node.nodeSize, { class: 'k-nowrap' }));
+      return false;
+    }
+    return node.type.name !== 'paragraph';
+  });
+  return DecorationSet.create(doc, decos);
+}
+
+export const CellNoWrap = Extension.create({
+  name: 'cellNoWrap',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin<DecorationSet>({
+        key: cellNoWrapKey,
+        state: {
+          init: (_c, state) => noWrapDecos(state.doc),
+          apply: (tr, old) => (tr.docChanged ? noWrapDecos(tr.doc) : old),
+        },
+        props: {
+          decorations(state) {
+            return cellNoWrapKey.getState(state);
           },
         },
       }),

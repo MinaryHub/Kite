@@ -676,7 +676,7 @@ export class HwpxConverter {
         cells.push({ row, col, cs, rs, w, node: { type: 'tableCell', attrs, content } });
       });
     });
-    const t = assembleTable(cells, rowCnt, numAttr(tbl, 'colCnt', 0));
+    const t = assembleTable(cells, rowCnt, numAttr(tbl, 'colCnt', 0), hwpToPx(numAttr(kid(tbl, 'sz'), 'width', 0)));
     const rows = t.content!;
     const inM = kid(tbl, 'inMargin');
     const tAttrs: Record<string, any> = {};

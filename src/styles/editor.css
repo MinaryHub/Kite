@@ -23,7 +23,7 @@
 @counter-style k-hollow-square { system: cyclic; symbols: '□'; suffix: ' '; }
 
 .kdoc-content {
-  font-family: '함초롬바탕', 'HCR Batang', '한컴바탕', '바탕', Batang, 'Noto Serif KR', serif;
+  font-family: '함초롬바탕', 'HCR Batang', '한컴바탕', '바탕', Batang, 'Noto Serif KR', serif, 'Segoe UI Symbol', Wingdings;
   font-size: 10pt;
   line-height: 1.6;
   color: #000;
@@ -177,7 +177,6 @@
   vertical-align: middle;
   position: relative;
   box-sizing: border-box;
-  min-width: 1em;
   font-weight: normal;
   text-align: left;
 }
@@ -188,10 +187,14 @@
 .kdoc-content th > p {
   text-align: justify;
 }
-/* 한글처럼 셀 안에서는 낱말(숫자·영문 포함) 중간을 끊지 않는다 */
+/* 셀 안에서는 낱말이 셀보다 길 때만 낱말 중간을 끊는다 */
 .kdoc-content td,
 .kdoc-content th {
-  overflow-wrap: normal;
+  overflow-wrap: break-word;
+}
+.kdoc-content td > p.k-nowrap,
+.kdoc-content th > p.k-nowrap {
+  white-space: nowrap;
 }
 /* 선 없음 (편집 화면에서는 '투명 선'을 연한 점선으로 표시) */
 .kdoc-content td[data-border~='l'], .kdoc-content th[data-border~='l'] { border-left: 1px dotted var(--k-transparent-line, #c9c9f4); }
