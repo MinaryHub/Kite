@@ -24,9 +24,35 @@ const LINE_MAX = 8 * 1024 * 1024;
 function userDataDir() {
   return app.getPath('userData');
 }
-function pipeName() {
-  const h = crypto.createHash('sha256').update(userDataDir().toLowerCase()).digest('hex').slice(0, 16);
-  return process.platform === 'win32' ? `\\\\.\\pipe\\kite-mcp-${h}` : path.join(userDataDir(), `kite-mcp-${h}.sock`);
+/**
+ * 파이프 이름은 실행할 때마다 무작위로 만들어 userData 에만 적어 둔다.
+ * (이름을 예측할 수 없어야 다른 프로세스가 먼저 같은 이름의 파이프를 만들어 가로챌 수 없다)
+ */
+const pipeFile = () => path.join(userDataDir(), 'mcp-pipe');
+function pipePathFor(id: string) {
+  return process.platform === 'win32' ? `\\\\.\\pipe\\kite-mcp-${id}` : path.join(userDataDir(), `kite-mcp-${id}.sock`);
+}
+function newPipeName(): string {
+  const id = crypto.randomBytes(16).toString('hex');
+  fs.mkdirSync(userDataDir(), { recursive: true });
+  fs.writeFileSync(pipeFile(), id, { mode: 0o600 });
+  return pipePathFor(id);
+}
+function readPipeName(): string | null {
+  try {
+    const id = fs.readFileSync(pipeFile(), 'utf8').trim();
+    return /^[0-9a-f]{32}$/.test(id) ? pipePathFor(id) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 상호 인증: 토큰은 보내지 않고, 상대의 무작위 값에 대한 HMAC 으로 토큰을 안다는 것만 증명한다 */
+function proof(token: string, role: 'server' | 'client', a: string, b: string): string {
+  return crypto.createHmac('sha256', Buffer.from(token, 'hex')).update(`kite-mcp|${role}|${a}|${b}`).digest('hex');
+}
+function sameHex(a: unknown, b: string): boolean {
+  return typeof a === 'string' && a.length === b.length && /^[0-9a-f]+$/.test(a) && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 const tokenFile = () => path.join(userDataDir(), 'mcp-token');
 const configFile = () => path.join(userDataDir(), 'mcp.json');
@@ -187,36 +213,61 @@ async function callRenderer(client: string, name: string, args: Record<string, a
   });
 }
 
+/** 인증된 연결 (허용 취소/끄기 때 바로 끊기 위해) */
+const liveConns = new Map<net.Socket, string>();
+const isAllowed = (client: string) => cfg.allowed.includes(client) || sessionAllowed.has(client);
+
 function handleConnection(sock: net.Socket) {
   const token = readToken();
   let client = '';
-  let authed = false;
+  let state: 'hello' | 'auth' | 'ready' = 'hello';
+  let snonce = '';
+  let cnonce = '';
   const bad = () => sock.destroy();
   sock.setTimeout(10 * 60 * 1000, bad);
+  sock.on('close', () => liveConns.delete(sock));
   onLines(
     sock,
     async (msg) => {
-      if (!authed) {
-        // 첫 줄: { type: 'hello', token, client }
-        if (msg?.type !== 'hello' || !token || typeof msg.token !== 'string' || msg.token.length !== token.length || !crypto.timingSafeEqual(Buffer.from(msg.token), Buffer.from(token))) {
+      if (state === 'hello') {
+        // 1) { type: 'hello', client, cnonce } → 서버가 토큰을 안다는 증명과 함께 도전값을 보낸다
+        if (msg?.type !== 'hello' || !token || typeof msg.cnonce !== 'string' || !/^[0-9a-f]{64}$/.test(msg.cnonce)) {
           send(sock, { type: 'hello', ok: false, error: '인증에 실패했습니다.' });
           return bad();
         }
+        cnonce = msg.cnonce;
+        snonce = crypto.randomBytes(32).toString('hex');
         client = typeof msg.client === 'string' && msg.client.trim() ? msg.client.trim().slice(0, 60).replace(/[\u0000-\u001f]/g, '') : '알 수 없는 앱';
+        state = 'auth';
+        send(sock, { type: 'challenge', snonce, proof: proof(token, 'server', cnonce, snonce) });
+        return;
+      }
+      if (state === 'auth') {
+        // 2) { type: 'auth', proof } → 클라이언트도 토큰을 아는지 확인한 뒤 사용자 허용
+        if (msg?.type !== 'auth' || !token || !sameHex(msg.proof, proof(token, 'client', snonce, cnonce))) {
+          send(sock, { type: 'hello', ok: false, error: '인증에 실패했습니다.' });
+          return bad();
+        }
+        if (!cfg.enabled) {
+          send(sock, { type: 'hello', ok: false, error: 'Kite 에서 AI 앱 연결이 꺼져 있습니다.' });
+          return bad();
+        }
         const ok = await approve(client);
         send(sock, { type: 'hello', ok, error: ok ? undefined : '사용자가 연결을 거부했습니다.' });
         if (!ok) return bad();
-        authed = true;
+        state = 'ready';
+        liveConns.set(sock, client);
         return;
       }
-      // { type: 'call', id, name, args }
+      // 3) { type: 'call', id, name, args }
       if (msg?.type !== 'call' || typeof msg.id !== 'string' || !MCP_TOOL_NAMES.has(msg.name)) {
         send(sock, { type: 'result', id: msg?.id, ok: false, text: '알 수 없는 요청입니다.' });
         return;
       }
-      if (!cfg.enabled) {
-        send(sock, { type: 'result', id: msg.id, ok: false, text: 'Kite 에서 AI 앱 연결이 꺼져 있습니다.' });
-        return;
+      // 허용 취소/끄기는 이미 연결된 앱에도 바로 적용
+      if (!cfg.enabled || !isAllowed(client)) {
+        send(sock, { type: 'result', id: msg.id, ok: false, text: !cfg.enabled ? 'Kite 에서 AI 앱 연결이 꺼져 있습니다.' : '이 앱의 연결 허용이 취소되었습니다.' });
+        return bad();
       }
       const args = msg.args && typeof msg.args === 'object' && !Array.isArray(msg.args) ? msg.args : {};
       const r = await callRenderer(client, msg.name, args);
@@ -227,10 +278,20 @@ function handleConnection(sock: net.Socket) {
   sock.on('error', () => {});
 }
 
+/** 조건에 맞지 않는 연결을 끊는다 */
+function dropConnections(keep: (client: string) => boolean) {
+  for (const [sock, client] of liveConns) {
+    if (!keep(client)) {
+      liveConns.delete(sock);
+      sock.destroy();
+    }
+  }
+}
+
 function startServer() {
   if (server) return;
   ensureToken();
-  const name = pipeName();
+  const name = newPipeName();
   if (process.platform !== 'win32') {
     try {
       fs.unlinkSync(name);
@@ -248,6 +309,12 @@ function startServer() {
 function stopServer() {
   server?.close();
   server = null;
+  dropConnections(() => false);
+  try {
+    fs.unlinkSync(pipeFile());
+  } catch {
+    /* 없음 */
+  }
 }
 
 /** 실행 중인 Kite 에서 호출: 설정에 따라 파이프 서버를 켜고 IPC 를 등록한다 */
@@ -288,11 +355,16 @@ export function initMcpHost(win: () => BrowserWindow | null) {
   ipcMain.handle('mcp:set', (_e, patch: Partial<McpConfig>) => {
     if (patch && typeof patch.enabled === 'boolean') cfg.enabled = patch.enabled;
     if (patch && typeof patch.confirmEdits === 'boolean') cfg.confirmEdits = patch.confirmEdits;
-    if (patch && Array.isArray(patch.allowed)) cfg.allowed = cfg.allowed.filter((x) => patch.allowed!.includes(x));
+    if (patch && Array.isArray(patch.allowed)) {
+      const revoked = cfg.allowed.filter((x) => !patch.allowed!.includes(x));
+      cfg.allowed = cfg.allowed.filter((x) => patch.allowed!.includes(x));
+      revoked.forEach((x) => sessionAllowed.delete(x));
+    }
     writeMcpConfig(cfg);
     if (cfg.enabled) startServer();
     else stopServer();
-    if (patch && Array.isArray(patch.allowed)) sessionAllowed.clear();
+    // 허용이 취소된 앱의 연결은 바로 끊는다
+    dropConnections(isAllowed);
     return { ...cfg, running: !!server };
   });
   ipcMain.handle('mcp:register-claude', () => registerClaudeDesktop());
@@ -359,7 +431,9 @@ export async function runMcpBridge() {
 
   const tryConnect = (): Promise<net.Socket | null> =>
     new Promise((resolve) => {
-      const s = net.connect(pipeName());
+      const name = readPipeName();
+      if (!name) return resolve(null);
+      const s = net.connect(name);
       s.once('connect', () => resolve(s));
       s.once('error', () => resolve(null));
     });
@@ -388,10 +462,21 @@ export async function runMcpBridge() {
       if (!sock) throw new Error('Kite 에 연결하지 못했습니다. Kite 를 실행하고 도구 > AI 앱 연결이 켜져 있는지 확인하세요.');
       const pending = new Map<string, (r: { ok: boolean; text: string }) => void>();
       const c: Conn = { sock, pending };
+      const cnonce = crypto.randomBytes(32).toString('hex');
       const hello = new Promise<void>((resolve, reject) => {
         onLines(
           sock!,
           (msg) => {
+            if (msg?.type === 'challenge') {
+              // 서버가 토큰을 아는지 먼저 확인한다 (가짜 파이프에는 아무것도 보내지 않는다)
+              const tk = readToken();
+              if (!tk || typeof msg.snonce !== 'string' || !/^[0-9a-f]{64}$/.test(msg.snonce) || !sameHex(msg.proof, proof(tk, 'server', cnonce, msg.snonce))) {
+                sock!.destroy();
+                return reject(new Error('Kite 인증에 실패했습니다. Kite 를 다시 실행하세요.'));
+              }
+              send(sock!, { type: 'auth', proof: proof(tk, 'client', msg.snonce, cnonce) });
+              return;
+            }
             if (msg?.type === 'hello') return msg.ok ? resolve() : reject(new Error(msg.error || '연결이 거부되었습니다.'));
             if (msg?.type === 'result' && typeof msg.id === 'string') {
               const done = pending.get(msg.id);
@@ -408,7 +493,7 @@ export async function runMcpBridge() {
           if (conn === c) conn = null;
         });
       });
-      send(sock, { type: 'hello', token: readToken(), client: clientName });
+      send(sock, { type: 'hello', client: clientName, cnonce });
       await hello;
       conn = c;
       return c;

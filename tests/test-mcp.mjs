@@ -77,25 +77,57 @@ try {
   kite.kill();
 }
 
-// 3) 토큰이 틀리면 거부되는지 (파이프에 직접 연결)
+// 3) 토큰을 모르는 클라이언트는 거부되는지 (파이프에 직접 연결, 틀린 증명)
+const net = await import('node:net');
+const pipePath = (id) => String.raw`\\.\pipe\kite-mcp-` + id;
+const crypto = await import('node:crypto');
 {
-  const net = await import('node:net');
-  const crypto = await import('node:crypto');
-  const h = crypto.createHash('sha256').update(userData.toLowerCase()).digest('hex').slice(0, 16);
-  const pipe = `\\\\.\\pipe\\kite-mcp-${h}`;
   const kite2 = spawn(electron, [root], { env, stdio: 'ignore' });
   await new Promise((r) => setTimeout(r, 7000));
+  const id = fs.readFileSync(path.join(userData, 'mcp-pipe'), 'utf8').trim();
   const reply = await new Promise((resolve) => {
-    const s = net.connect(pipe);
+    const s = net.connect(pipePath(id));
     let buf = '';
-    s.on('data', (d) => (buf += d));
-    s.on('connect', () => s.write(JSON.stringify({ type: 'hello', token: '0'.repeat(64), client: 'kite-test' }) + '\n'));
+    s.on('data', (d) => {
+      buf += d;
+      if (/"challenge"/.test(buf) && !/"auth-sent"/.test(buf)) {
+        buf += '"auth-sent"';
+        s.write(JSON.stringify({ type: 'auth', proof: '0'.repeat(64) }) + '\n');
+      }
+    });
+    s.on('connect', () => s.write(JSON.stringify({ type: 'hello', client: 'kite-test', cnonce: crypto.randomBytes(32).toString('hex') }) + '\n'));
     s.on('close', () => resolve(buf));
     s.on('error', (e) => resolve('ERR ' + e.message));
     setTimeout(() => resolve(buf || 'TIMEOUT'), 5000);
   });
-  check('wrong token rejected', /"ok":false/.test(String(reply)), String(reply).trim());
+  check('wrong proof rejected', /"ok":false/.test(String(reply)) && !/token/.test(String(reply)), String(reply).replace(/"proof":"[0-9a-f]+"/, '"proof":"…"').trim().slice(0, 160));
   kite2.kill();
+}
+
+// 4) 가짜 파이프(가로채기): 다리는 서버 증명이 틀리면 아무 증명도 보내지 않고 끊어야 한다
+{
+  const fakeUd = fs.mkdtempSync(path.join(os.tmpdir(), 'kite-mcp-fake-'));
+  const id = crypto.randomBytes(16).toString('hex');
+  fs.writeFileSync(path.join(fakeUd, 'mcp-pipe'), id);
+  fs.writeFileSync(path.join(fakeUd, 'mcp-token'), crypto.randomBytes(32).toString('hex'));
+  let received = '';
+  const fake = net.createServer((sock) => {
+    sock.on('data', (d) => {
+      received += d;
+      const m = /"cnonce":"([0-9a-f]+)"/.exec(String(d));
+      if (m) sock.write(JSON.stringify({ type: 'challenge', snonce: crypto.randomBytes(32).toString('hex'), proof: crypto.randomBytes(32).toString('hex') }) + '\n');
+    });
+    sock.on('error', () => {});
+  });
+  await new Promise((r) => fake.listen(pipePath(id), r));
+  const t2 = new StdioClientTransport({ command: electron, args: [root, '--mcp'], env: { ...env, KITE_USER_DATA: fakeUd } });
+  const c2 = new Client({ name: 'kite-test', version: '1.0.0' });
+  await c2.connect(t2);
+  const r = await c2.callTool({ name: 'list_documents', arguments: {} });
+  const token = fs.readFileSync(path.join(fakeUd, 'mcp-token'), 'utf8');
+  check('fake pipe: no token/auth leaked', r.isError === true && !received.includes(token) && !/"auth"/.test(received), (r.content?.[0]?.text || '') + ' | fake got: ' + received.replace(/[0-9a-f]{64}/g, '…').trim());
+  await c2.close().catch(() => {});
+  fake.close();
 }
 
 await new Promise((r) => setTimeout(r, 1000));
