@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
 import type { KDocument } from '../../types';
-import { type JNode, mmToTwip, xmlEscape } from '../common';
+import { type JNode, mmToTwip, xmlEscape, parseBorderCss } from '../common';
 import { type CharStyle, type FlatBlock, type FlatPara, type FlatTable, type ParaStyle, flattenDoc } from '../flatten';
 import { prepareImage } from '../imageUtil';
 
@@ -156,9 +156,20 @@ function tableXml(ctx: Ctx, t: FlatTable): string {
       let p = `<w:tcPr><w:tcW w:w="${w}" w:type="dxa"/>`;
       if (c.colspan > 1) p += `<w:gridSpan w:val="${c.colspan}"/>`;
       if (merge) p += merge;
-      if (c.noBorders.length) {
+      const det = parseBorderCss(c.borderCss);
+      if (c.noBorders.length || Object.keys(det).length) {
         const map: Record<string, string> = { t: 'top', l: 'left', b: 'bottom', r: 'right' };
-        p += '<w:tcBorders>' + ['t', 'l', 'b', 'r'].filter((s) => c.noBorders.includes(s)).map((s) => `<w:${map[s]} w:val="nil"/>`).join('') + '</w:tcBorders>';
+        const VAL: Record<string, string> = { solid: 'single', dashed: 'dashed', dotted: 'dotted', double: 'double' };
+        p +=
+          '<w:tcBorders>' +
+          ['t', 'l', 'b', 'r']
+            .map((s) => {
+              if (c.noBorders.includes(s)) return `<w:${map[s]} w:val="nil"/>`;
+              const d = det[s as 'l'];
+              return d ? `<w:${map[s]} w:val="${VAL[d.s]}" w:sz="${Math.max(2, Math.round((d.w / 0.3528) * 8))}" w:space="0" w:color="${hex(d.c)}"/>` : '';
+            })
+            .join('') +
+          '</w:tcBorders>';
       }
       if (c.bg) p += `<w:shd w:val="clear" w:color="auto" w:fill="${hex(c.bg)}"/>`;
       p += `<w:vAlign w:val="${c.vAlign === 'middle' ? 'center' : c.vAlign}"/>`;

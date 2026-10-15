@@ -19,6 +19,10 @@ import {
   round,
   textNode,
   HWP_NUM_FORMATS,
+  HWP_BORDER_WIDTHS,
+  hwpBorderStyle,
+  borderCss,
+  type BorderSide,
 } from '../common';
 import { charMarks, paraAttrs, type CharPr, type ParaPr, type BorderFill, type Numbering } from '../hwpx/reader';
 
@@ -166,8 +170,11 @@ function parseDocInfo(recs: Rec[]): DocInfo {
       }
       case T.BORDER_FILL: {
         const noBorders: string[] = [];
+        const sides: Record<string, BorderSide> = {};
         ['l', 'r', 't', 'b'].forEach((side, i) => {
-          if (u8(r, 2 + i * 6) === 0) noBorders.push(side);
+          const type = u8(r, 2 + i * 6);
+          if (type === 0) noBorders.push(side);
+          else sides[side] = { w: HWP_BORDER_WIDTHS[u8(r, 3 + i * 6)] ?? 0.12, c: colorRefToHex(u32(r, 4 + i * 6)), s: hwpBorderStyle(type) };
         });
         const fillType = u32(r, 32);
         let bg: string | null = null;
@@ -176,7 +183,7 @@ function parseDocInfo(recs: Rec[]): DocInfo {
           if (c !== 0xffffffff && (c & 0xff000000) === 0) bg = colorRefToHex(c);
           if (bg === '#FFFFFF') bg = null;
         }
-        info.borderFills.push({ bg, noBorders });
+        info.borderFills.push({ bg, noBorders, css: borderCss(sides) });
         break;
       }
       case T.CHAR_SHAPE: {
@@ -204,7 +211,8 @@ function parseDocInfo(recs: Rec[]): DocInfo {
           bold: !!(attr & 2),
           italic: !!(attr & 1),
           underline: ulType === 1 || ulType === 3,
-          strike: ((attr >>> 18) & 7) !== 0,
+          // 새 버전은 '종류=1, 모양=15(없음)'을 기본으로 기록하므로 모양까지 확인
+          strike: ((attr >>> 18) & 7) !== 0 && ((attr >>> 26) & 15) !== 15,
           sup: !!(attr & (1 << 15)),
           sub: !!(attr & (1 << 16)),
           highlight: shadeHex && shadeHex !== '#FFFFFF' ? shadeHex : null,
@@ -586,6 +594,7 @@ class HwpConverter {
       const attrs: Record<string, any> = { colspan: cs, rowspan: rs, colwidth: null };
       if (bf?.bg) attrs.backgroundColor = bf.bg;
       if (bf && bf.noBorders.length) attrs.borderStyle = bf.noBorders.join(' ');
+      if (bf?.css) attrs.borderCss = bf.css;
       if (va === 0) attrs.verticalAlign = 'top';
       else if (va === 2) attrs.verticalAlign = 'bottom';
       cells.push({ row, col, cs, rs, w, node: { type: 'tableCell', attrs, content } });

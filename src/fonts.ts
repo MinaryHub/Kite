@@ -48,6 +48,17 @@ export const LATIN_FONTS = [
 
 export const FONT_SIZES = [8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 26, 28, 32, 36, 40, 48, 54, 60, 72];
 
+const SERIF_RE = /바탕|명조|궁서|신명|Batang|Myeongjo|Gungsuh|serif|Times|Georgia|Cambria|Garamond|Mincho|Song|Ming|윤명조|한양신|본명조/i;
+
+/** 설치되지 않은 글꼴을 위한 대체 글꼴 목록 (한글처럼 명조/고딕 계열 유지) */
+export function fontStack(name: string): string {
+  const q = `'${name.replace(/'/g, "\'")}'`;
+  if (/D2Coding|Consolas|Courier|Mono|코딩/i.test(name)) return `${q}, D2Coding, Consolas, monospace`;
+  return SERIF_RE.test(name)
+    ? `${q}, '함초롬바탕', 'HCR Batang', '휴먼명조', '바탕', Batang, serif`
+    : `${q}, '함초롬돋움', 'HCR Dotum', '맑은 고딕', 'Malgun Gothic', sans-serif`;
+}
+
 export function cssFontFamily(name: string): string {
-  return `'${name.replace(/'/g, "\\'")}', '함초롬바탕', serif`;
+  return fontStack(name);
 }

@@ -59,6 +59,8 @@ export interface FlatCell {
   bg: string | null;
   vAlign: 'top' | 'middle' | 'bottom';
   noBorders: string[];
+  /** 굵기/색/종류가 기본과 다른 선 */
+  borderCss: string | null;
   blocks: FlatBlock[];
   header: boolean;
 }
@@ -393,6 +395,7 @@ function flattenTable(n: JNode, ctx: Ctx): FlatTable {
         bg: cell.attrs?.backgroundColor || null,
         vAlign: va === 'top' ? 'top' : va === 'bottom' ? 'bottom' : 'middle',
         noBorders: cell.attrs?.borderStyle ? String(cell.attrs.borderStyle).split(/\s+/).filter(Boolean) : [],
+        borderCss: cell.attrs?.borderCss || null,
         blocks: flattenBlocks(cell.content || [], { ...ctx, indent: 0 }),
         header: cell.type === 'tableHeader',
       };

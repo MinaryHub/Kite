@@ -1,7 +1,7 @@
 import * as CFB from 'cfb';
 import { deflateRaw } from 'pako';
 import type { KDocument } from '../../types';
-import { type JNode, mmToHwp, pxToHwp, ptToHwp } from '../common';
+import { type JNode, mmToHwp, pxToHwp, ptToHwp, parseBorderCss, HWP_BORDER_WIDTHS } from '../common';
 import {
   type CharStyle,
   type FlatBlock,
@@ -145,6 +145,7 @@ interface BF {
   bg: string | null;
   noBorders: string[];
   borders: boolean;
+  css?: string | null;
 }
 
 class Registry {
@@ -277,9 +278,18 @@ function paraShapeRec(p: ParaStyle & { bf: number }): Uint8Array {
 function borderFillRec(d: BF): Uint8Array {
   const b = new Buf();
   b.u16(0);
+  const det = parseBorderCss(d.css);
   for (const s of ['l', 'r', 't', 'b']) {
     const on = d.borders && !d.noBorders.includes(s);
-    b.u8(on ? 1 : 0).u8(on ? 1 : 0).u32(0);
+    const x = det[s as 'l'];
+    if (on && x) {
+      let wi = 0;
+      HWP_BORDER_WIDTHS.forEach((w, i) => {
+        if (Math.abs(w - x.w) < Math.abs(HWP_BORDER_WIDTHS[wi] - x.w)) wi = i;
+      });
+      const type = x.s === 'dashed' ? 2 : x.s === 'dotted' ? 3 : x.s === 'double' ? 8 : 1;
+      b.u8(type).u8(wi).u32(rgb(x.c));
+    } else b.u8(on ? 1 : 0).u8(on ? 1 : 0).u32(0);
   }
   b.u8(1).u8(0).u32(0); // 대각선
   if (d.bg) {
@@ -618,7 +628,7 @@ class BodyWriter {
     w.rec(TAG.TABLE, lv + 1, tb.out());
     for (const row of t.cells) {
       for (const cell of row) {
-        const bf = this.reg.bf({ bg: cell.bg, noBorders: cell.noBorders, borders: cell.noBorders.length < 4 });
+        const bf = this.reg.bf({ bg: cell.bg, noBorders: cell.noBorders, borders: cell.noBorders.length < 4, css: cell.borderCss });
         const cw = colW.slice(cell.col, cell.col + cell.colspan).reduce((a, b) => a + b, 0);
         const va = cell.vAlign === 'top' ? 0 : cell.vAlign === 'bottom' ? 2 : 1;
         const blocks = cell.blocks.length ? cell.blocks : [{ kind: 'para', style: defaultPara(), baseChar: defaultChar(), inlines: [], pageBreakBefore: false } as FlatPara];

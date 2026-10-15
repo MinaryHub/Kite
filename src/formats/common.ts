@@ -499,3 +499,47 @@ export function applyNumFormat(template: string, values: number[], formats: stri
       return formatNumber(values[i] || 1, formats[i] || 'DIGIT');
     });
 }
+
+// ---------- 셀 테두리 ----------
+export interface BorderSide {
+  /** 굵기 mm */
+  w: number;
+  c: string;
+  s: 'solid' | 'dashed' | 'dotted' | 'double';
+}
+
+/** 기본(0.12mm 검은 실선)과 다른 쪽만 "t:0.5mm solid #00A651;b:..." 형식으로 */
+export function borderCss(sides: Partial<Record<'l' | 'r' | 't' | 'b', BorderSide>>): string | null {
+  const parts: string[] = [];
+  for (const k of ['t', 'b', 'l', 'r'] as const) {
+    const v = sides[k];
+    if (!v) continue;
+    if (v.s === 'solid' && v.w <= 0.15 && (v.c === '#000000' || !v.c)) continue;
+    parts.push(`${k}:${Math.max(0.1, v.w)}mm ${v.s} ${v.c || '#000000'}`);
+  }
+  return parts.length ? parts.join(';') : null;
+}
+
+export function parseBorderCss(v: string | null | undefined): Partial<Record<'l' | 'r' | 't' | 'b', BorderSide>> {
+  const out: Partial<Record<'l' | 'r' | 't' | 'b', BorderSide>> = {};
+  if (!v) return out;
+  for (const part of v.split(';')) {
+    const m = /^([lrtb]):([\d.]+)mm (\w+) (#[0-9A-Fa-f]{6})$/.exec(part.trim());
+    if (m) out[m[1] as 'l'] = { w: parseFloat(m[2]), s: m[3] as any, c: m[4].toUpperCase() };
+  }
+  return out;
+}
+
+export const HWP_BORDER_WIDTHS = [0.1, 0.12, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0];
+export function hwpBorderStyle(type: number): BorderSide['s'] {
+  if (type === 2 || type === 6 || type === 4 || type === 5) return 'dashed';
+  if (type === 3 || type === 7) return 'dotted';
+  if (type >= 8 && type <= 10) return 'double';
+  return 'solid';
+}
+export function hwpxBorderStyle(type: string): BorderSide['s'] {
+  if (/DASH/.test(type)) return 'dashed';
+  if (/DOT|CIRCLE/.test(type)) return 'dotted';
+  if (/DOUBLE|THICK|THIN/.test(type) && type !== 'SOLID') return 'double';
+  return 'solid';
+}

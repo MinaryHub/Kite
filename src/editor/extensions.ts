@@ -4,6 +4,7 @@ import Underline from '@tiptap/extension-underline';
 import TextStyle from '@tiptap/extension-text-style';
 import Color from '@tiptap/extension-color';
 import FontFamily from '@tiptap/extension-font-family';
+import { fontStack } from '../fonts';
 import Highlight from '@tiptap/extension-highlight';
 import Subscript from '@tiptap/extension-subscript';
 import Superscript from '@tiptap/extension-superscript';
@@ -41,7 +42,23 @@ export function getExtensions(): AnyExtension[] {
     Underline,
     TextStyle,
     Color,
-    FontFamily,
+    // 글꼴 이름은 그대로 저장하고, 화면에는 대체 글꼴 목록을 붙여 그린다
+    FontFamily.extend({
+      addGlobalAttributes() {
+        return [
+          {
+            types: this.options.types,
+            attributes: {
+              fontFamily: {
+                default: null,
+                parseHTML: (el: HTMLElement) => el.style.fontFamily?.split(',')[0].replace(/['"]/g, '').trim() || null,
+                renderHTML: (a: Record<string, any>) => (a.fontFamily ? { style: `font-family: ${fontStack(a.fontFamily)}` } : {}),
+              },
+            },
+          },
+        ];
+      },
+    }),
     Highlight.configure({ multicolor: true }),
     Subscript,
     Superscript,

@@ -261,6 +261,24 @@ const cellAttrs = {
     parseHTML: (el: HTMLElement) => el.style.verticalAlign || el.getAttribute('valign') || null,
     renderHTML: (a: Record<string, any>) => (a.verticalAlign ? { style: `vertical-align: ${a.verticalAlign}` } : {}),
   },
+  /** 선 굵기/색/종류 (t:0.5mm solid #00A651;...) */
+  borderCss: {
+    default: null,
+    parseHTML: (el: HTMLElement) => el.getAttribute('data-border-css') || null,
+    renderHTML: (a: Record<string, any>) => {
+      if (!a.borderCss) return {};
+      const names: Record<string, string> = { t: 'top', b: 'bottom', l: 'left', r: 'right' };
+      const style = String(a.borderCss)
+        .split(';')
+        .map((p: string) => {
+          const [k, v] = p.split(':');
+          return names[k] && v ? `border-${names[k]}: ${v}` : '';
+        })
+        .filter(Boolean)
+        .join('; ');
+      return { 'data-border-css': a.borderCss, style };
+    },
+  },
   borderStyle: {
     default: null,
     parseHTML: (el: HTMLElement) => el.getAttribute('data-border') || null,

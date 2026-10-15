@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
 import type { KDocument } from '../../types';
-import { type JNode, mmToHwp, pxToHwp, ptToHwp, xmlEscape } from '../common';
+import { type JNode, mmToHwp, pxToHwp, ptToHwp, xmlEscape, parseBorderCss } from '../common';
 import {
   type CharStyle,
   type FlatBlock,
@@ -33,6 +33,7 @@ interface BorderFillDef {
   noBorders: string[];
   borders: boolean; // false면 모든 선 없음
   bottomOnly?: boolean;
+  css?: string | null;
 }
 
 class Registry {
@@ -265,7 +266,7 @@ class SectionWriter {
     for (const row of t.cells) {
       xml += '<hp:tr>';
       for (const cell of row) {
-        const bf = this.reg.borderFill({ bg: cell.bg, noBorders: cell.noBorders, borders: cell.noBorders.length < 4 });
+        const bf = this.reg.borderFill({ bg: cell.bg, noBorders: cell.noBorders, borders: cell.noBorders.length < 4, css: cell.borderCss });
         const w = colW.slice(cell.col, cell.col + cell.colspan).reduce((a, b) => a + b, 0);
         const inner = this.blocks(cell.blocks, true) || `<hp:p id="2147483648" paraPrIDRef="0" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="0"/></hp:p>`;
         const va = cell.vAlign === 'top' ? 'TOP' : cell.vAlign === 'bottom' ? 'BOTTOM' : 'CENTER';
@@ -362,8 +363,14 @@ function headerXml(reg: Registry): string {
 
   const bfXml = reg.borderFills
     .map((b, i) => {
-      const side = (tag: string, s: string) =>
-        `<hh:${tag} type="${b.borders && !b.noBorders.includes(s) ? 'SOLID' : 'NONE'}" width="0.12 mm" color="#000000"/>`;
+      const det = parseBorderCss(b.css);
+      const TYPE: Record<string, string> = { solid: 'SOLID', dashed: 'DASH', dotted: 'DOT', double: 'DOUBLE_SLIM' };
+      const side = (tag: string, s: string) => {
+        const on = b.borders && !b.noBorders.includes(s);
+        const d = det[s as 'l'];
+        if (!on || !d) return `<hh:${tag} type="${on ? 'SOLID' : 'NONE'}" width="0.12 mm" color="#000000"/>`;
+        return `<hh:${tag} type="${TYPE[d.s] || 'SOLID'}" width="${d.w} mm" color="${d.c}"/>`;
+      };
       let x = `<hh:borderFill id="${i + 1}" threeD="0" shadow="0" centerLine="NONE" breakCellSeparateLine="0"><hh:slash type="NONE" Crooked="0" isCounter="0"/><hh:backSlash type="NONE" Crooked="0" isCounter="0"/>`;
       x += side('leftBorder', 'l') + side('rightBorder', 'r') + side('topBorder', 't') + side('bottomBorder', 'b');
       x += `<hh:diagonal type="SOLID" width="0.1 mm" color="#000000"/>`;

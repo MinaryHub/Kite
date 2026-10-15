@@ -26,6 +26,9 @@ import {
   round,
   textNode,
   NumberingCounter,
+  borderCss,
+  hwpxBorderStyle,
+  type BorderSide,
   applyNumFormat,
 } from '../common';
 
@@ -65,6 +68,8 @@ export interface BorderFill {
   bg: string | null;
   /** 선이 없는 쪽: l, r, t, b */
   noBorders: string[];
+  /** 기본과 다른 선 (굵기/색/종류) */
+  css?: string | null;
 }
 
 export interface Numbering {
@@ -141,6 +146,7 @@ export function parseHeader(doc: Document): HeaderInfo {
     }
     if (bg === '#FFFFFF') bg = null;
     const noBorders: string[] = [];
+    const det: Record<string, BorderSide> = {};
     const sides: [string, string][] = [
       ['leftBorder', 'l'],
       ['rightBorder', 'r'],
@@ -150,8 +156,9 @@ export function parseHeader(doc: Document): HeaderInfo {
     for (const [tag, s] of sides) {
       const b = kid(bf, tag);
       if (!b || attr(b, 'type') === 'NONE') noBorders.push(s);
+      else det[s] = { w: parseFloat(attr(b, 'width') || '0.12') || 0.12, c: normColor(attr(b, 'color')) || '#000000', s: hwpxBorderStyle(attr(b, 'type') || 'SOLID') };
     }
-    info.borderFills.set(id, { bg, noBorders });
+    info.borderFills.set(id, { bg, noBorders, css: borderCss(det) });
   }
 
   for (const cp of descendants(doc, 'charPr')) {
@@ -652,6 +659,7 @@ export class HwpxConverter {
         const attrs: Record<string, any> = { colspan: cs, rowspan: rs, colwidth: null };
         if (bf?.bg) attrs.backgroundColor = bf.bg;
         if (bf && bf.noBorders.length) attrs.borderStyle = bf.noBorders.join(' ');
+        if (bf?.css) attrs.borderCss = bf.css;
         if (va === 'TOP') attrs.verticalAlign = 'top';
         else if (va === 'BOTTOM') attrs.verticalAlign = 'bottom';
         cells.push({ row, col, cs, rs, w, node: { type: 'tableCell', attrs, content } });

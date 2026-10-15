@@ -155,6 +155,11 @@
 .kdoc-content th > p {
   text-align: justify;
 }
+/* 한글처럼 셀 안에서는 낱말(숫자·영문 포함) 중간을 끊지 않는다 */
+.kdoc-content td,
+.kdoc-content th {
+  overflow-wrap: normal;
+}
 /* 선 없음 (편집 화면에서는 '투명 선'을 연한 점선으로 표시) */
 .kdoc-content td[data-border~='l'], .kdoc-content th[data-border~='l'] { border-left: 1px dotted var(--k-transparent-line, #c9c9f4); }
 .kdoc-content td[data-border~='r'], .kdoc-content th[data-border~='r'] { border-right: 1px dotted var(--k-transparent-line, #c9c9f4); }
