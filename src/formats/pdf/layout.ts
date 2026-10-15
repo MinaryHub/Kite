@@ -450,6 +450,10 @@ function findTables(segsIn: Seg[], page: Box): { tables: TableModel[]; leftover:
     }
     const nC = xs.length - 1;
     const nR = ys.length - 1;
+    if (nC > 120 || nR > 400) {
+      leftover.push(...segs);
+      continue;
+    }
     const hSeg = (yi: number, c: number): Seg | null => {
       const a = xs[c];
       const b = xs[c + 1];
@@ -523,7 +527,9 @@ function normHex(c: string): string {
 
 // ---------------- 채운 사각형 ----------------
 /** 작은 타일(이미지 마스크)들을 이어 붙여 큰 사각형으로 */
-function mergeTiles(tiles: FillRect[]): FillRect[] {
+function mergeTiles(tilesIn: FillRect[]): FillRect[] {
+  // 타일은 작은 조각이어야 한다 (큰 사각형이 격자 칸을 수없이 차지하지 않도록)
+  const tiles = tilesIn.filter((t) => t.x1 - t.x0 <= 40 && t.y1 - t.y0 <= 40).slice(0, 20000);
   if (!tiles.length) return [];
   const n = tiles.length;
   const parent = tiles.map((_, i) => i);
@@ -538,7 +544,8 @@ function mergeTiles(tiles: FillRect[]): FillRect[] {
         grid.get(k)!.push(i);
       }
   });
-  for (const list of grid.values())
+  for (const list0 of grid.values()) {
+    const list = list0.length > 200 ? list0.slice(0, 200) : list0;
     for (let a = 0; a < list.length; a++)
       for (let b = a + 1; b < list.length; b++) {
         const p = tiles[list[a]];
@@ -549,6 +556,7 @@ function mergeTiles(tiles: FillRect[]): FillRect[] {
           if (ra !== rb) parent[ra] = rb;
         }
       }
+  }
   const groups = new Map<number, FillRect[]>();
   for (let i = 0; i < n; i++) {
     const r = find(i);
@@ -599,7 +607,9 @@ export function analyzePage(pc: PageContent) {
   // 글자가 있는 페이지의 전면 배경 그림은 제외
   if (glyphs.length > 20) images = images.filter((im) => area(im) < pageArea * 0.7);
 
-  const segs = mergeSegs(pc.segs.filter((s) => s.color !== '#ffffff' && s.color !== '#FFFFFF'));
+  let segs = mergeSegs(pc.segs.filter((s) => s.color !== '#ffffff' && s.color !== '#FFFFFF'));
+  // 합친 뒤에도 선이 너무 많으면(비정상 문서) 표 찾기를 하지 않는다
+  if (segs.length > 3000) segs = [];
   const { tables, leftover } = findTables(segs, page);
 
   // 채운 사각형: 타일 합치기, 흰색·페이지 전체 제외
@@ -619,6 +629,15 @@ export function analyzePage(pc: PageContent) {
     fills.push(f);
   }
 
+  // 셀이 너무 많으면 뒤쪽 표는 버린다 (글자 배정 비용 제한)
+  let cellBudget = 4000;
+  for (let i = 0; i < tables.length; i++) {
+    cellBudget -= tables[i].cells.length;
+    if (cellBudget < 0) {
+      tables.splice(i);
+      break;
+    }
+  }
   // 표 셀 배경
   const usedFill = new Set<FillRect>();
   for (const t of tables)
@@ -637,9 +656,11 @@ export function analyzePage(pc: PageContent) {
 
   // 상자: 글자를 품은 채운 사각형 (표 셀과 거의 같은 것은 셀 배경으로 이미 처리)
   const boxes: BoxModel[] = [];
+  let boxCandidates = 0;
   for (const f of fills) {
     if (usedFill.has(f)) continue;
     if (f.x1 - f.x0 < 15 || f.y1 - f.y0 < 8) continue;
+    if (++boxCandidates > 300) break;
     const hasText = glyphs.some((g) => g.ch.trim() && containsPt(f, g.x + g.w / 2, g.y - g.size * 0.3));
     if (!hasText) continue;
     // 표를 감싸는 배경은 무시
@@ -674,7 +695,7 @@ export function analyzePage(pc: PageContent) {
 
   // 밑줄: 표에 쓰이지 않은 가로선 바로 위의 글자
   const underlined = new Set<Glyph>();
-  for (const s of leftover) {
+  for (const s of leftover.length * glyphs.length > 5e6 ? [] : leftover) {
     if (s.dir !== 'h' || s.w > 2) continue;
     for (const g of glyphs) {
       const d = s.pos - g.y;

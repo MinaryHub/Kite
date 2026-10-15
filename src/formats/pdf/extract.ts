@@ -71,6 +71,11 @@ export interface FontInfo {
   vertical: boolean;
 }
 
+/** 악의적인 PDF 로 계산이 폭주하지 않도록 페이지당 상한 */
+const MAX_GLYPHS = 60000;
+const MAX_SEGS = 40000;
+const MAX_FILLS = 40000;
+
 export const mul = (m1: number[], m2: number[]): Mat => [
   m1[0] * m2[0] + m1[1] * m2[2],
   m1[0] * m2[1] + m1[1] * m2[3],
@@ -151,7 +156,13 @@ export function extractPage(ops: { fnArray: number[]; argsArray: any[] }, OPS: R
 
   const scaleOf = (m: number[]) => Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) || 1;
 
+  const clampX = (v: number) => Math.max(-10, Math.min(W + 10, v));
+  const clampY = (v: number) => Math.max(-10, Math.min(H + 10, v));
   const addLine = (p: [number, number], q: [number, number], w: number, color: string) => {
+    if (segs.length >= MAX_SEGS) return;
+    if (!isFinite(p[0] + p[1] + q[0] + q[1])) return;
+    p = [clampX(p[0]), clampY(p[1])];
+    q = [clampX(q[0]), clampY(q[1])];
     const style: Seg['style'] = st.dash.length && st.dash.some((v) => v > 0) ? (st.dash[0] <= st.lineWidth * 2.5 ? 'dotted' : 'dashed') : 'solid';
     const dx = Math.abs(p[0] - q[0]);
     const dy = Math.abs(p[1] - q[1]);
@@ -160,7 +171,9 @@ export function extractPage(ops: { fnArray: number[]; argsArray: any[] }, OPS: R
     else if (dx < 0.8 && dy > 0.15 && dy > dx) segs.push({ dir: 'v', pos: (p[0] + q[0]) / 2, a: Math.min(p[1], q[1]), b: Math.max(p[1], q[1]), w, color, style });
   };
 
-  const addFillRect = (r: { x0: number; y0: number; x1: number; y1: number }, color: string, tile = false) => {
+  const addFillRect = (r0: { x0: number; y0: number; x1: number; y1: number }, color: string, tile = false) => {
+    if (fills.length >= MAX_FILLS || !isFinite(r0.x0 + r0.y0 + r0.x1 + r0.y1)) return;
+    const r = { x0: clampX(r0.x0), y0: clampY(r0.y0), x1: clampX(r0.x1), y1: clampY(r0.y1) };
     const w = r.x1 - r.x0;
     const h = r.y1 - r.y0;
     if (w <= 0 || h <= 0) return;
@@ -264,7 +277,7 @@ export function extractPage(ops: { fnArray: number[]; argsArray: any[] }, OPS: R
         const [px, py] = apply(M, st.x + x * hs, st.y + st.rise);
         // 아래아(U+119E, 조합용 자모)로 쓴 가운뎃점은 호환 자모 ㆍ로
         const ch = typeof g.unicode === 'string' ? g.unicode.replace(/\u119E/g, '\u318D') : '';
-        if (ch && px > -5 && px < W + 5 && py > -5 && py < H + 5)
+        if (ch && glyphs.length < MAX_GLYPHS && px > -5 && px < W + 5 && py > -5 && py < H + 5)
           glyphs.push({
             ch,
             x: px,
@@ -433,7 +446,7 @@ export function extractPage(ops: { fnArray: number[]; argsArray: any[] }, OPS: R
       case OPS.paintInlineImageXObject:
       case OPS.paintImageXObjectRepeat: {
         const r = unitRect(st.ctm);
-        if (r.x1 - r.x0 < 4 || r.y1 - r.y0 < 4) break;
+        if (r.x1 - r.x0 < 4 || r.y1 - r.y0 < 4 || images.length >= 500 || !isFinite(r.x0 + r.y0 + r.x1 + r.y1)) break;
         images.push({ ...r, ref: a[0] });
         break;
       }
