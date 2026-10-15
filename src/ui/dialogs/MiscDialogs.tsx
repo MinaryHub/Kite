@@ -118,7 +118,7 @@ export function SymbolDialog({ onClose }: { onClose: () => void }) {
   const [sel, setSel] = useState<string>('');
   const [recent, setRecent] = useState<string[]>(() => {
     try {
-      return JSON.parse(localStorage.getItem('khwp:recent-symbols') || '[]');
+      return JSON.parse(localStorage.getItem('kite:recent-symbols') || '[]');
     } catch {
       return [];
     }
@@ -129,7 +129,7 @@ export function SymbolDialog({ onClose }: { onClose: () => void }) {
     const r = [ch, ...recent.filter((x) => x !== ch)].slice(0, 16);
     setRecent(r);
     try {
-      localStorage.setItem('khwp:recent-symbols', JSON.stringify(r));
+      localStorage.setItem('kite:recent-symbols', JSON.stringify(r));
     } catch {
       /* 무시 */
     }
@@ -219,7 +219,7 @@ export function GotoDialog({ onClose }: { onClose: () => void }) {
   const total = app.active?.layout.pageCount || 1;
   const [page, setPage] = useState(1);
   const ok = () => {
-    window.dispatchEvent(new CustomEvent('khwp:goto-page', { detail: Math.max(1, Math.min(total, page)) }));
+    window.dispatchEvent(new CustomEvent('kite:goto-page', { detail: Math.max(1, Math.min(total, page)) }));
     onClose();
   };
   return (
@@ -501,13 +501,11 @@ export function StyleDialog({ onClose }: { onClose: () => void }) {
 
 export function AboutDialog({ onClose }: { onClose: () => void }) {
   return (
-    <Modal title="K-HWP 정보" onClose={onClose} width={420} footer={<button className="btn primary" onClick={onClose}>확인</button>}>
+    <Modal title="Kite 정보" onClose={onClose} width={420} footer={<button className="btn primary" onClick={onClose}>확인</button>}>
       <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
-        <div className="brand-mark" style={{ width: 54, height: 54, fontSize: 30, borderRadius: 10, background: '#2f6fd6', color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 800 }}>
-          K
-        </div>
+        <img src="./icon.svg" alt="" style={{ width: 56, height: 56 }} />
         <div>
-          <div style={{ fontSize: 16, fontWeight: 700 }}>K-HWP 워드프로세서 0.1</div>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>Kite 워드프로세서 0.1</div>
           <div className="unit">HWP · HWPX · DOCX · DOC · PDF · MD 문서 편집기</div>
         </div>
       </div>

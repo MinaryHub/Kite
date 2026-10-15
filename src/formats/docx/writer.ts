@@ -363,7 +363,7 @@ export async function writeDocx(doc: KDocument): Promise<Uint8Array> {
       `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>`,
   );
   zip.file('docProps/core.xml', core);
-  zip.file('docProps/app.xml', DECL + `<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>K-HWP</Application></Properties>`);
+  zip.file('docProps/app.xml', DECL + `<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>Kite</Application></Properties>`);
   zip.file('word/document.xml', documentXml);
   zip.file('word/styles.xml', stylesXml());
   zip.file('word/settings.xml', settingsXml);

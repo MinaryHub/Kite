@@ -1,6 +1,6 @@
 {
-  "name": "khwp",
-  "productName": "K-HWP 워드프로세서",
+  "name": "kite",
+  "productName": "Kite",
   "version": "0.1.0",
   "description": "HWP/HWPX/DOCX/DOC/PDF/MD 문서 편집기",
   "author": "SMIC",
@@ -16,8 +16,9 @@
     "dist": "npm run build && electron-builder --win"
   },
   "build": {
-    "appId": "kr.smic.khwp",
-    "productName": "K-HWP",
+    "appId": "kr.smic.kite",
+    "productName": "Kite",
+    "icon": "build/icon.ico",
     "files": [
       "dist/**",
       "dist-electron/**",
@@ -29,18 +30,25 @@
     "fileAssociations": [
       {
         "ext": "hwp",
-        "name": "HWP 문서"
+        "name": "HWP 문서",
+        "icon": "build/icon.ico"
       },
       {
         "ext": "hwpx",
-        "name": "HWPX 문서"
+        "name": "HWPX 문서",
+        "icon": "build/icon.ico"
       }
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "shortcutName": "Kite",
       "allowToChangeInstallationDirectory": true
     },
     "electronDist": "node_modules/electron/dist"

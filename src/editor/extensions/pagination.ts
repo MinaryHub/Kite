@@ -587,7 +587,7 @@ export const Pagination = Extension.create<{}, PaginationStorage>({
           storage.schedule = schedule;
           const onCompEnd = () => setTimeout(schedule, 0);
           view.dom.addEventListener('compositionend', onCompEnd);
-          window.addEventListener('khwp:relayout', schedule);
+          window.addEventListener('kite:relayout', schedule);
           const ro = new ResizeObserver(() => schedule());
           ro.observe(view.dom);
           (document as any).fonts?.ready?.then(schedule);
@@ -602,7 +602,7 @@ export const Pagination = Extension.create<{}, PaginationStorage>({
               clearTimeout(timer);
               ro.disconnect();
               view.dom.removeEventListener('compositionend', onCompEnd);
-              window.removeEventListener('khwp:relayout', schedule);
+              window.removeEventListener('kite:relayout', schedule);
             },
           };
         },

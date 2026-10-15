@@ -61,13 +61,13 @@ export function PageView({ tab, active }: { tab: DocTab; active: boolean }) {
       scrollToPage(target, true);
     };
     const onGoto = (e: Event) => scrollToPage(((e as CustomEvent).detail as number) - 1, true);
-    window.addEventListener('khwp:fit', onFit);
-    window.addEventListener('khwp:page-step', onStep);
-    window.addEventListener('khwp:goto-page', onGoto);
+    window.addEventListener('kite:fit', onFit);
+    window.addEventListener('kite:page-step', onStep);
+    window.addEventListener('kite:goto-page', onGoto);
     return () => {
-      window.removeEventListener('khwp:fit', onFit);
-      window.removeEventListener('khwp:page-step', onStep);
-      window.removeEventListener('khwp:goto-page', onGoto);
+      window.removeEventListener('kite:fit', onFit);
+      window.removeEventListener('kite:page-step', onStep);
+      window.removeEventListener('kite:goto-page', onGoto);
     };
   });
 
@@ -76,7 +76,7 @@ export function PageView({ tab, active }: { tab: DocTab; active: boolean }) {
     if (!active || app.zoomMode === 'custom') return;
     const ws = wsRef.current;
     if (!ws) return;
-    const ro = new ResizeObserver(() => window.dispatchEvent(new CustomEvent('khwp:fit', { detail: app.zoomMode })));
+    const ro = new ResizeObserver(() => window.dispatchEvent(new CustomEvent('kite:fit', { detail: app.zoomMode })));
     ro.observe(ws);
     return () => ro.disconnect();
   }, [active, app.zoomMode]);
@@ -245,7 +245,7 @@ export function PageView({ tab, active }: { tab: DocTab; active: boolean }) {
       onWheel={onWheel}
       onDragOver={(e) => e.preventDefault()}
       onDrop={onDrop}
-      onScroll={() => window.dispatchEvent(new Event('khwp:scroll'))}
+      onScroll={() => window.dispatchEvent(new Event('kite:scroll'))}
     >
       <div className="stage-wrap" style={{ width: g.W * zoom, height: stageH * zoom + 64 }}>
         <div className="stage" ref={stageRef} style={{ width: g.W, height: stageH, transform: `scale(${zoom})` }} onMouseDown={onStageMouseDown}>

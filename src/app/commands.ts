@@ -206,8 +206,8 @@ export const commands: Record<string, Command> = {
   'view.zoomIn': { label: '확대', icon: 'ZoomIn', shortcut: 'Ctrl+=', keys: ['Ctrl+=', 'Ctrl++'], run: () => app.setZoom(app.zoom + 0.1) },
   'view.zoomOut': { label: '축소', icon: 'ZoomOut', shortcut: 'Ctrl+-', keys: ['Ctrl+-'], run: () => app.setZoom(app.zoom - 0.1) },
   'view.zoom100': { label: '100%', shortcut: 'Ctrl+0', keys: ['Ctrl+0'], run: () => app.setZoom(1) },
-  'view.fitWidth': { label: '폭 맞춤', run: () => window.dispatchEvent(new CustomEvent('khwp:fit', { detail: 'width' })) },
-  'view.fitPage': { label: '쪽 맞춤', run: () => window.dispatchEvent(new CustomEvent('khwp:fit', { detail: 'page' })) },
+  'view.fitWidth': { label: '폭 맞춤', run: () => window.dispatchEvent(new CustomEvent('kite:fit', { detail: 'width' })) },
+  'view.fitPage': { label: '쪽 맞춤', run: () => window.dispatchEvent(new CustomEvent('kite:fit', { detail: 'page' })) },
   'view.fullscreen': { label: '전체 화면', shortcut: 'F11', keys: ['F11'], run: () => platform.toggleFullscreen() },
 
   // ----- 입력 -----
@@ -292,8 +292,8 @@ export const commands: Record<string, Command> = {
     },
     enabled: hasDoc,
   },
-  'page.next': { label: '다음 쪽', shortcut: 'Alt+PgDn', keys: ['Alt+PageDown'], run: () => window.dispatchEvent(new CustomEvent('khwp:page-step', { detail: 1 })) },
-  'page.prev': { label: '이전 쪽', shortcut: 'Alt+PgUp', keys: ['Alt+PageUp'], run: () => window.dispatchEvent(new CustomEvent('khwp:page-step', { detail: -1 })) },
+  'page.next': { label: '다음 쪽', shortcut: 'Alt+PgDn', keys: ['Alt+PageDown'], run: () => window.dispatchEvent(new CustomEvent('kite:page-step', { detail: 1 })) },
+  'page.prev': { label: '이전 쪽', shortcut: 'Alt+PgUp', keys: ['Alt+PageUp'], run: () => window.dispatchEvent(new CustomEvent('kite:page-step', { detail: -1 })) },
 
   // ----- 표 -----
   'table.insert': { label: '표 만들기...', icon: 'Table', shortcut: 'Ctrl+N,T', run: () => app.openDialog('table'), enabled: hasDoc },
@@ -359,7 +359,7 @@ export const commands: Record<string, Command> = {
   'tools.ai': { label: 'AI 도우미 (Claude·GPT·Gemini)', icon: 'Sparkles', shortcut: 'Ctrl+Shift+A', keys: ['Ctrl+Shift+A'], run: () => app.set({ aiOpen: !app.aiOpen }), active: () => app.aiOpen },
   'tools.prefs': { label: '환경 설정...', icon: 'Settings', run: () => app.openDialog('prefs') },
   'tools.shortcuts': { label: '단축키 목록', icon: 'Keyboard', shortcut: 'Shift+F1', keys: ['Shift+F1'], run: () => app.openDialog('shortcuts') },
-  'tools.about': { label: 'K-HWP 정보', icon: 'Info', run: () => app.openDialog('about') },
+  'tools.about': { label: 'Kite 정보', icon: 'Info', run: () => app.openDialog('about') },
   'tools.overwrite': { label: '삽입/수정 모드 전환', shortcut: 'Insert', run: () => chain().toggleOverwrite().run(), enabled: hasDoc },
 };
 

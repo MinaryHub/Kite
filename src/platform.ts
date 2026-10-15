@@ -1,8 +1,8 @@
-import type { KhwpApi } from '../electron/preload';
+import type { KiteApi } from '../electron/preload';
 
 declare global {
   interface Window {
-    khwp?: KhwpApi;
+    kite?: KiteApi;
   }
 }
 
@@ -12,7 +12,7 @@ export interface OpenedFile {
   data: Uint8Array;
 }
 
-const api = typeof window !== 'undefined' ? window.khwp : undefined;
+const api = typeof window !== 'undefined' ? window.kite : undefined;
 export const isElectron = !!api;
 
 function baseName(p: string) {
@@ -35,7 +35,23 @@ function pickFiles(accept: string, multiple = true): Promise<File[]> {
   });
 }
 
-const LS_PREFIX = 'khwp:';
+const LS_PREFIX = 'kite:';
+
+// 예전 이름(K-HWP) 때의 로컬 저장소 키를 새 이름으로 옮긴다 (한 번만)
+try {
+  if (typeof localStorage !== 'undefined' && !localStorage.getItem('kite:migrated')) {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('khwp:')) {
+        const nk = 'kite:' + k.slice(5);
+        if (localStorage.getItem(nk) == null) localStorage.setItem(nk, localStorage.getItem(k) || '');
+      }
+    }
+    localStorage.setItem('kite:migrated', '1');
+  }
+} catch {
+  /* 저장소를 쓸 수 없는 환경 */
+}
 
 export const platform = {
   isElectron,

@@ -17,10 +17,10 @@ export function Ruler() {
 
   useEffect(() => {
     const h = () => force();
-    window.addEventListener('khwp:scroll', h);
+    window.addEventListener('kite:scroll', h);
     window.addEventListener('resize', h);
     return () => {
-      window.removeEventListener('khwp:scroll', h);
+      window.removeEventListener('kite:scroll', h);
       window.removeEventListener('resize', h);
     };
   }, []);

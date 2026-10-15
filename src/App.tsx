@@ -24,10 +24,10 @@ export function App() {
       const d = (e as CustomEvent).detail;
       app.openDialog('footnote', { pos: d.pos, text: d.text });
     };
-    window.addEventListener('khwp:edit-footnote', onFootnote);
+    window.addEventListener('kite:edit-footnote', onFootnote);
     // 브라우저에서 창 닫기 전 경고
     const before = (e: BeforeUnloadEvent) => {
-      if (!import.meta.env.DEV && !(window as any).khwp && app.docs.some((d) => d.dirty)) {
+      if (!import.meta.env.DEV && !(window as any).kite && app.docs.some((d) => d.dirty)) {
         e.preventDefault();
         e.returnValue = '';
       }
@@ -35,7 +35,7 @@ export function App() {
     window.addEventListener('beforeunload', before);
     return () => {
       off();
-      window.removeEventListener('khwp:edit-footnote', onFootnote);
+      window.removeEventListener('kite:edit-footnote', onFootnote);
       window.removeEventListener('beforeunload', before);
     };
   }, []);
@@ -86,7 +86,10 @@ function StartScreen() {
   return (
     <div className="start-screen">
       <div className="start-card">
-        <h1>K-HWP 워드프로세서</h1>
+        <h1>
+          <img className="start-logo" src="./icon.svg" alt="" />
+          Kite
+        </h1>
         <div className="sub">HWP · HWPX · DOCX · DOC · PDF · Markdown 문서를 열고 편집합니다.</div>
         <div className="start-actions">
           <button onClick={() => app.newDoc()}>

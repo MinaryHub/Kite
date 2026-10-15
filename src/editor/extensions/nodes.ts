@@ -112,7 +112,7 @@ export const KImage = Image.extend({
         layout(n.attrs.width, n.attrs.height, cropOf(n.attrs.crop));
       };
       apply(node);
-      img.addEventListener('load', () => window.dispatchEvent(new Event('khwp:relayout')));
+      img.addEventListener('load', () => window.dispatchEvent(new Event('kite:relayout')));
 
       handle.addEventListener('mousedown', (e) => {
         e.preventDefault();
@@ -268,7 +268,7 @@ export const Footnote = Node.create({
       dom.addEventListener('dblclick', (e) => {
         e.preventDefault();
         const pos = typeof getPos === 'function' ? getPos() : null;
-        window.dispatchEvent(new CustomEvent('khwp:edit-footnote', { detail: { pos, text: node.attrs.text } }));
+        window.dispatchEvent(new CustomEvent('kite:edit-footnote', { detail: { pos, text: node.attrs.text } }));
       });
       return {
         dom,
@@ -276,7 +276,7 @@ export const Footnote = Node.create({
           if (n.type.name !== 'footnote') return false;
           dom.title = n.attrs.text;
           dom.setAttribute('data-footnote', n.attrs.text);
-          window.dispatchEvent(new Event('khwp:relayout'));
+          window.dispatchEvent(new Event('kite:relayout'));
           return true;
         },
         ignoreMutation: () => true,

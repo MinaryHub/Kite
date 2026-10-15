@@ -53,6 +53,6 @@ const api = {
   },
 };
 
-contextBridge.exposeInMainWorld('khwp', api);
+contextBridge.exposeInMainWorld('kite', api);
 
-export type KhwpApi = typeof api;
+export type KiteApi = typeof api;

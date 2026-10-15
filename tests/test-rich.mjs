@@ -6,7 +6,7 @@ const P = (attrs, ...content) => ({ type: 'paragraph', attrs, content });
 const cell = (text, attrs = {}) => ({ type: 'tableCell', attrs: { colspan: 1, rowspan: 1, colwidth: [140], ...attrs }, content: [P({}, T(text))] });
 const doc = {
   content: { type: 'doc', content: [
-    { type: 'heading', attrs: { level: 1 }, content: [T('K-HWP 기능 시험 문서')] },
+    { type: 'heading', attrs: { level: 1 }, content: [T('Kite 기능 시험 문서')] },
     P({}, T('보통 글자, '), T('진하게', [{ type: 'bold' }]), T(', '), T('기울임', [{ type: 'italic' }]), T(', '), T('밑줄', [{ type: 'underline' }]), T(', '), T('취소선', [{ type: 'strike' }]), T(', '), T('빨간 14pt 맑은 고딕', [{ type: 'textStyle', attrs: { color: '#FF0000', fontSize: 14, fontFamily: '맑은 고딕' } }]), T(', '), T('형광펜', [{ type: 'highlight', attrs: { color: '#FFFF00' } }]), T(' 그리고 H'), T('2', [{ type: 'subscript' }]), T('O, x'), T('2', [{ type: 'superscript' }]), T('.')),
     P({ textAlign: 'center' }, T('가운데 정렬 문단')),
     P({ textAlign: 'right' }, T('오른쪽 정렬 문단')),
@@ -23,8 +23,8 @@ const doc = {
     { type: 'pageBreak' },
     P({}, T('둘째 쪽 첫 문단입니다.\t탭 뒤 글자')),
   ] },
-  settings: { page: { width: 210, height: 297, marginTop: 20, marginBottom: 15, marginLeft: 30, marginRight: 30, marginHeader: 15, marginFooter: 15, gutter: 0, landscape: false }, header: { text: 'K-HWP 시험 머리말', align: 'right' }, footer: { text: '꼬리말 {{PAGE}}쪽', align: 'left' }, pageNumber: { pos: 'bottom-center', format: 'dash', start: 1 } },
-  meta: { title: 'K-HWP 시험', author: 'K-HWP' },
+  settings: { page: { width: 210, height: 297, marginTop: 20, marginBottom: 15, marginLeft: 30, marginRight: 30, marginHeader: 15, marginFooter: 15, gutter: 0, landscape: false }, header: { text: 'Kite 시험 머리말', align: 'right' }, footer: { text: '꼬리말 {{PAGE}}쪽', align: 'left' }, pageNumber: { pos: 'bottom-center', format: 'dash', start: 1 } },
+  meta: { title: 'Kite 시험', author: 'Kite' },
 };
 fs.writeFileSync('tests/.build/rich.hwp', await m.writeHwp(doc, { pageCount: 2 }));
 fs.writeFileSync('tests/.build/rich.hwpx', await m.writeHwpx(doc, { pageCount: 2 }));

@@ -225,8 +225,8 @@ export function MenuBar() {
   return (
     <div className="menubar" ref={ref}>
       <div className="brand">
-        <span className="brand-mark">K</span>
-        <span>K-HWP</span>
+        <img className="brand-mark" src="./icon.svg" alt="" />
+        <span>Kite</span>
       </div>
       {MENUS.map((m, i) => (
         <div key={m.label} className={'menu-root' + (open === i ? ' open' : '')}>

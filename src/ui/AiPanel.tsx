@@ -27,7 +27,7 @@ interface Msg {
   pending?: boolean;
 }
 
-const api = typeof window !== 'undefined' ? window.khwp : undefined;
+const api = typeof window !== 'undefined' ? window.kite : undefined;
 
 const PROVIDERS: { id: Provider; label: string; defaultModel: string }[] = [
   { id: 'claude', label: 'Claude', defaultModel: 'claude-opus-5-5' },
@@ -35,7 +35,7 @@ const PROVIDERS: { id: Provider; label: string; defaultModel: string }[] = [
   { id: 'gemini', label: 'Gemini', defaultModel: 'gemini-flash-latest' },
 ];
 
-const SYSTEM = `당신은 한국어 워드프로세서 "K-HWP"에 내장된 문서 작성 도우미입니다.
+const SYSTEM = `당신은 한국어 워드프로세서 "Kite"에 내장된 문서 작성 도우미입니다.
 - 사용자가 보낸 <문서> 또는 <선택> 내용을 바탕으로 요약, 교정, 다듬기, 번역, 초안 작성 등을 돕습니다.
 - 답은 한국어로 하되, 사용자가 다른 언어를 요청하면 따르세요.
 - 문서에 바로 넣을 결과물(교정본, 번역문, 초안 등)을 요청받으면 머리말이나 설명 없이 결과물만 Markdown으로 답하세요. 표가 필요하면 Markdown 표를 쓰세요.
@@ -50,7 +50,7 @@ const QUICK: { label: string; prompt: string }[] = [
   { label: '한국어로 번역', prompt: '다음 내용을 자연스러운 한국어로 번역해 주세요. 번역문만 보여 주세요.' },
 ];
 
-const LS = 'khwp:ai:';
+const LS = 'kite:ai:';
 const lsGet = (k: string, d: string) => {
   try {
     return localStorage.getItem(LS + k) || d;
@@ -314,7 +314,7 @@ ${href.slice(0, 500)}
           }
         }}
       >
-        {!api && <div className="ai-empty">AI 도우미는 데스크톱 앱(K-HWP)에서 사용할 수 있습니다.</div>}
+        {!api && <div className="ai-empty">AI 도우미는 데스크톱 앱(Kite)에서 사용할 수 있습니다.</div>}
         {api && !msgs.length && (
           <div className="ai-empty">
             문서를 쓰다가 궁금한 것을 물어보세요.

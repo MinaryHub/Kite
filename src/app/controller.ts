@@ -215,7 +215,7 @@ export class AppController {
 
   updateTitle() {
     const d = this.active;
-    platform.setTitle(d ? `${d.dirty ? '* ' : ''}${d.title} - K-HWP 워드프로세서` : 'K-HWP 워드프로세서');
+    platform.setTitle(d ? `${d.dirty ? '* ' : ''}${d.title} - Kite` : 'Kite');
   }
 
   async openFiles() {
@@ -438,7 +438,7 @@ export class AppController {
     this.zoom = zoom;
     this.zoomMode = mode;
     this.emit();
-    window.dispatchEvent(new Event('khwp:relayout'));
+    window.dispatchEvent(new Event('kite:relayout'));
     this.savePrefs();
   }
 
@@ -446,7 +446,7 @@ export class AppController {
     this.view = { ...this.view, [k]: !this.view[k] };
     this.emit();
     this.savePrefs();
-    setTimeout(() => window.dispatchEvent(new Event('khwp:relayout')), 0);
+    setTimeout(() => window.dispatchEvent(new Event('kite:relayout')), 0);
   }
 
   fontList(): { korean: string[]; others: string[]; recent: string[] } {

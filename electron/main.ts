@@ -15,8 +15,40 @@ function filesFromArgv(argv: string[]): string[] {
   return argv.slice(1).filter((a) => !a.startsWith('-') && DOC_EXT.test(a) && fs.existsSync(a));
 }
 
-// 자가 점검 실행은 별도 데이터 폴더를 써서 사용 중인 K-HWP 창과 섞이지 않게 한다
-if (process.env.KHWP_SMOKE) app.setPath('userData', path.join(os.tmpdir(), 'khwp-smoke-' + process.pid));
+// 예전 이름(K-HWP) 때의 설정 폴더(최근 문서·환경 설정·자동 저장·AI 키)를 새 폴더로 옮긴다.
+// 새 폴더에 아직 설정이 없을 때 한 번만 복사하고, 예전 폴더는 그대로 둔다.
+function migrateOldUserData() {
+  try {
+    const target = app.getPath('userData');
+    if (fs.existsSync(path.join(target, 'prefs.json')) || fs.existsSync(path.join(target, 'recent.json'))) return;
+    const appData = app.getPath('appData');
+    const old = ['K-HWP 워드프로세서', 'K-HWP'].map((n) => path.join(appData, n)).find((p) => fs.existsSync(p));
+    if (!old) return;
+    const SKIP = /^(Cache|Code Cache|GPUCache|DawnCache|DawnGraphiteCache|DawnWebGPUCache|GrShaderCache|ShaderCache|blob_storage|Crashpad|SingletonLock|SingletonCookie|SingletonSocket|lockfile)$/i;
+    fs.mkdirSync(target, { recursive: true });
+    for (const name of fs.readdirSync(old)) {
+      if (SKIP.test(name)) continue;
+      try {
+        fs.cpSync(path.join(old, name), path.join(target, name), { recursive: true, force: false, errorOnExist: false });
+      } catch {
+        /* 사용 중인 파일 등은 건너뜀 */
+      }
+    }
+  } catch {
+    /* 무시 */
+  }
+}
+if (!process.env.KITE_SMOKE) migrateOldUserData();
+app.setAppUserModelId('kr.smic.kite');
+
+/** 창 아이콘 (배포본: dist/icon.png, 개발: public/icon.png) */
+function appIcon(): string | undefined {
+  for (const p of [path.join(__dirname, '../dist/icon.png'), path.join(__dirname, '../public/icon.png')]) if (fs.existsSync(p)) return p;
+  return undefined;
+}
+
+// 자가 점검 실행은 별도 데이터 폴더를 써서 사용 중인 Kite 창과 섞이지 않게 한다
+if (process.env.KITE_SMOKE) app.setPath('userData', path.join(os.tmpdir(), 'kite-smoke-' + process.pid));
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -40,7 +72,8 @@ function createWindow() {
     height: 940,
     minWidth: 900,
     minHeight: 600,
-    title: 'K-HWP 워드프로세서',
+    title: 'Kite',
+    icon: appIcon(),
     backgroundColor: '#e9ebee',
     show: false,
     webPreferences: {
@@ -58,18 +91,18 @@ function createWindow() {
   if (isDev) mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL!);
   else mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
 
-  // 자가 점검 (KHWP_SMOKE=1): 문서를 연 뒤 상태를 출력하고 종료
-  if (process.env.KHWP_SMOKE) {
+  // 자가 점검 (KITE_SMOKE=1): 문서를 연 뒤 상태를 출력하고 종료
+  if (process.env.KITE_SMOKE) {
     mainWindow.webContents.on('console-message', (_e, _l, msg) => console.log('[renderer]', msg));
     mainWindow.webContents.once('did-finish-load', () => {
       setTimeout(async () => {
         try {
           const r = await mainWindow!.webContents.executeJavaScript(
-            `(async () => { const d = [...document.querySelectorAll('.doc-tab .dt-title')].map(e => e.textContent); const ai = window.khwp ? await window.khwp.aiKeyStatus() : null; return JSON.stringify({ tabs: d, pages: document.querySelectorAll('.workspace:not(.hidden-doc) .paper').length, title: document.title, hasApi: !!window.khwp, ai }); })()`,
+            `(async () => { const d = [...document.querySelectorAll('.doc-tab .dt-title')].map(e => e.textContent); const ai = window.kite ? await window.kite.aiKeyStatus() : null; return JSON.stringify({ tabs: d, pages: document.querySelectorAll('.workspace:not(.hidden-doc) .paper').length, title: document.title, hasApi: !!window.kite, ai }); })()`,
           );
-          fs.writeFileSync(process.env.KHWP_SMOKE!, 'SMOKE ' + r);
+          fs.writeFileSync(process.env.KITE_SMOKE!, 'SMOKE ' + r);
         } catch (e) {
-          fs.writeFileSync(process.env.KHWP_SMOKE!, 'SMOKE-ERR ' + String(e));
+          fs.writeFileSync(process.env.KITE_SMOKE!, 'SMOKE-ERR ' + String(e));
         }
         forceClose = true;
         app.exit(0);
@@ -145,7 +178,7 @@ ipcMain.handle('file:save-dialog', async (_e, defaultPath: string, filters) => {
 
 ipcMain.handle('file:write', async (_e, p: string, data: Uint8Array) => {
   // 안전한 저장: 임시 파일에 쓴 뒤 교체
-  const tmp = p + '.khwp-tmp';
+  const tmp = p + '.kite-tmp';
   await fs.promises.writeFile(tmp, Buffer.from(data));
   await fs.promises.rename(tmp, p);
   return true;
@@ -324,7 +357,7 @@ ipcMain.handle('fonts:list', async () => {
 
 // ---------------- 구형 DOC 변환 ----------------
 ipcMain.handle('doc:convert', async (_e, data: Uint8Array) => {
-  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'khwp-'));
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'kite-'));
   const src = path.join(tmpDir, 'input.doc');
   const dst = path.join(tmpDir, 'output.docx');
   await fs.promises.writeFile(src, Buffer.from(data));
