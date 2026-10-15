@@ -1,0 +1,385 @@
+/* ===== 문서 본문 (한글 기본값: 함초롬바탕 10pt, 줄 간격 160%, 양쪽 정렬) ===== */
+@counter-style k-circled {
+  system: fixed;
+  symbols: '①' '②' '③' '④' '⑤' '⑥' '⑦' '⑧' '⑨' '⑩' '⑪' '⑫' '⑬' '⑭' '⑮' '⑯' '⑰' '⑱' '⑲' '⑳';
+  suffix: ' ';
+}
+@counter-style k-paren {
+  system: extends decimal;
+  prefix: '(';
+  suffix: ') ';
+}
+@counter-style k-paren-hangul {
+  system: extends hangul;
+  prefix: '(';
+  suffix: ') ';
+}
+@counter-style k-dash { system: cyclic; symbols: '-'; suffix: ' '; }
+@counter-style k-arrow { system: cyclic; symbols: '➢'; suffix: ' '; }
+@counter-style k-check { system: cyclic; symbols: '✓'; suffix: ' '; }
+@counter-style k-diamond { system: cyclic; symbols: '◆'; suffix: ' '; }
+@counter-style k-ref { system: cyclic; symbols: '※'; suffix: ' '; }
+@counter-style k-filled-circle { system: cyclic; symbols: '●'; suffix: ' '; }
+@counter-style k-hollow-square { system: cyclic; symbols: '□'; suffix: ' '; }
+
+.kdoc-content {
+  font-family: '함초롬바탕', 'HCR Batang', '한컴바탕', '바탕', Batang, 'Noto Serif KR', serif;
+  font-size: 10pt;
+  line-height: 1.6;
+  color: #000;
+  outline: none;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  tab-size: 40pt;
+  position: relative;
+  caret-color: #000;
+  font-variant-ligatures: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.kdoc-content p,
+.kdoc-content h1,
+.kdoc-content h2,
+.kdoc-content h3,
+.kdoc-content h4,
+.kdoc-content h5,
+.kdoc-content h6 {
+  margin: 0;
+}
+.kdoc-content p {
+  text-align: justify;
+}
+.kdoc-content h1,
+.kdoc-content h2,
+.kdoc-content h3,
+.kdoc-content h4,
+.kdoc-content h5,
+.kdoc-content h6 {
+  font-weight: bold;
+  line-height: 1.6;
+  font-family: '함초롬돋움', 'HCR Dotum', '맑은 고딕', 'Malgun Gothic', sans-serif;
+}
+.kdoc-content h1 { font-size: 20pt; padding: 12pt 0 6pt; }
+.kdoc-content h2 { font-size: 16pt; padding: 12pt 0 6pt; }
+.kdoc-content h3 { font-size: 14pt; padding: 6pt 0 3pt; }
+.kdoc-content h4 { font-size: 12pt; padding: 6pt 0 3pt; }
+.kdoc-content h5 { font-size: 11pt; padding: 6pt 0 3pt; }
+.kdoc-content h6 { font-size: 10pt; padding: 6pt 0 3pt; }
+
+.kdoc-content ul,
+.kdoc-content ol {
+  margin: 0;
+  padding-left: 20pt;
+}
+.kdoc-content li > p {
+  text-align: inherit;
+}
+.kdoc-content ul[data-type='taskList'] {
+  list-style: none;
+  padding-left: 4pt;
+}
+.kdoc-content ul[data-type='taskList'] li {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+.kdoc-content ul[data-type='taskList'] li > label {
+  user-select: none;
+  margin-top: 0.15em;
+}
+.kdoc-content ul[data-type='taskList'] li > div {
+  flex: 1;
+}
+
+.kdoc-content blockquote {
+  margin: 0;
+  padding-left: 14pt;
+  border-left: 3px solid #b8c2d1;
+  color: #444;
+}
+.kdoc-content pre {
+  margin: 0;
+  padding: 4pt 6pt;
+  background: #f4f4f4;
+  border: 1px solid #e0e0e0;
+  font-family: D2Coding, Consolas, 'Courier New', monospace;
+  font-size: 9pt;
+  white-space: pre-wrap;
+}
+.kdoc-content code {
+  font-family: D2Coding, Consolas, monospace;
+  background: #f2f2f2;
+  padding: 0 2px;
+}
+.kdoc-content hr {
+  border: none;
+  border-top: 1px solid #000;
+  margin: 6pt 0;
+}
+.kdoc-content a {
+  color: #0563c1;
+  text-decoration: underline;
+  cursor: text;
+}
+.kdoc-content mark {
+  color: inherit;
+  padding: 0;
+}
+
+/* ----- 표 ----- */
+.kdoc-content .tableWrapper {
+  overflow: visible;
+  margin: 0;
+}
+.kdoc-content table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  margin: 0;
+}
+.kdoc-content td,
+.kdoc-content th {
+  border: 1px solid #000;
+  padding: 0.5mm var(--cell-px, 1.8mm);
+  vertical-align: middle;
+  position: relative;
+  box-sizing: border-box;
+  min-width: 1em;
+  font-weight: normal;
+  text-align: left;
+}
+.kdoc-content th {
+  background: #f2f2f2;
+}
+.kdoc-content td > p,
+.kdoc-content th > p {
+  text-align: justify;
+}
+/* 선 없음 (편집 화면에서는 '투명 선'을 연한 점선으로 표시) */
+.kdoc-content td[data-border~='l'], .kdoc-content th[data-border~='l'] { border-left: 1px dotted var(--k-transparent-line, #c9c9f4); }
+.kdoc-content td[data-border~='r'], .kdoc-content th[data-border~='r'] { border-right: 1px dotted var(--k-transparent-line, #c9c9f4); }
+.kdoc-content td[data-border~='t'], .kdoc-content th[data-border~='t'] { border-top: 1px dotted var(--k-transparent-line, #c9c9f4); }
+.kdoc-content td[data-border~='b'], .kdoc-content th[data-border~='b'] { border-bottom: 1px dotted var(--k-transparent-line, #c9c9f4); }
+.kdoc-content table[data-borderless='true'] td,
+.kdoc-content table[data-borderless='true'] th {
+  border: 1px dotted var(--k-transparent-line, #c9c9f4);
+}
+.hide-transparent .kdoc-content { --k-transparent-line: transparent; }
+
+.kdoc-content .selectedCell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(47, 111, 214, 0.22);
+  pointer-events: none;
+  z-index: 2;
+}
+.kdoc-content .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: -2px;
+  width: 4px;
+  background: #2f6fd6;
+  pointer-events: none;
+  z-index: 3;
+}
+.kdoc-content.resize-cursor {
+  cursor: col-resize;
+}
+
+/* ----- 그림 ----- */
+.kdoc-content .k-image {
+  display: inline-block;
+  position: relative;
+  line-height: 0;
+  vertical-align: bottom;
+  max-width: 100%;
+}
+.kdoc-content .k-image img {
+  max-width: 100%;
+  height: auto;
+}
+.kdoc-content .k-image img[style*='height'] {
+  object-fit: fill;
+}
+.kdoc-content .k-image.selected img,
+.kdoc-content img.ProseMirror-selectednode {
+  outline: 2px solid #2f6fd6;
+  outline-offset: 1px;
+}
+.kdoc-content .k-image-handle {
+  display: none;
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 11px;
+  height: 11px;
+  background: #fff;
+  border: 2px solid #2f6fd6;
+  cursor: nwse-resize;
+  z-index: 5;
+}
+.kdoc-content .k-image.selected .k-image-handle {
+  display: block;
+}
+
+/* ----- 쪽 나누기 / 페이지네이션 ----- */
+.kdoc-content .page-break {
+  height: 0;
+  position: relative;
+  margin: 0;
+  overflow: visible;
+}
+.kdoc-content .page-break::after {
+  content: '';
+  position: absolute;
+  left: -10px;
+  right: -10px;
+  top: -1px;
+  border-top: 1px dashed #7f9cd8;
+}
+.kdoc-content .page-break.ProseMirror-selectednode::after {
+  border-top: 2px solid #2f6fd6;
+}
+.hide-marks .kdoc-content .page-break::after {
+  display: none;
+}
+.kdoc-content .pg-spacer {
+  display: block;
+  pointer-events: none;
+  user-select: none;
+}
+.kdoc-content.pg-measuring .pg-spacer {
+  display: none !important;
+}
+.kdoc-content tr.pg-push-row > td,
+.kdoc-content tr.pg-push-row > th {
+  padding-top: calc(var(--pg-push) + 0.5mm);
+  /* 다음 쪽에서 이어지는 줄의 위쪽 선 */
+  background-image: linear-gradient(#000, #000);
+  background-size: 100% 1px;
+  background-position: 0 calc(var(--pg-push) - 1px);
+  background-repeat: no-repeat;
+}
+.kdoc-content tr.pg-push-row > td[data-border~='t'],
+.kdoc-content tr.pg-push-row > th[data-border~='t'] {
+  background-image: none;
+}
+.kdoc-content.pg-measuring tr.pg-push-row > td,
+.kdoc-content.pg-measuring tr.pg-push-row > th {
+  padding-top: 0.5mm;
+}
+
+/* ----- 각주 ----- */
+.kdoc-content sup.footnote-ref {
+  font-size: 0.62em;
+  vertical-align: super;
+  line-height: 0;
+  color: #1a4fb5;
+  cursor: pointer;
+  padding: 0 1px;
+}
+.kdoc-content sup.footnote-ref::after {
+  content: ')';
+}
+
+/* ----- 찾기 ----- */
+.kdoc-content .search-match {
+  background: #ffe58a;
+}
+.kdoc-content .search-match.current {
+  background: #ff9a3c;
+}
+
+/* ----- 문단 부호 보이기 ----- */
+.show-marks .kdoc-content p::after,
+.show-marks .kdoc-content h1::after,
+.show-marks .kdoc-content h2::after,
+.show-marks .kdoc-content h3::after,
+.show-marks .kdoc-content h4::after,
+.show-marks .kdoc-content h5::after,
+.show-marks .kdoc-content h6::after {
+  content: '↵';
+  color: #5b8fd9;
+  font-size: 0.85em;
+  font-family: sans-serif;
+  font-weight: normal;
+  pointer-events: none;
+}
+.show-marks .kdoc-content br.ProseMirror-trailingBreak {
+  display: none;
+}
+
+.kdoc-content .ProseMirror-gapcursor {
+  display: none;
+}
+.kdoc-content ::selection {
+  background: rgba(47, 111, 214, 0.28);
+}
+
+/* ===== 인쇄 ===== */
+#print-root {
+  display: none;
+}
+@media print {
+  body > *:not(#print-root) {
+    display: none !important;
+  }
+  html,
+  body {
+    background: #fff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  #print-root {
+    display: block !important;
+  }
+  #print-root .print-page {
+    box-shadow: none !important;
+    margin: 0 !important;
+  }
+  .kdoc-content td[data-border~='l'], .kdoc-content th[data-border~='l'] { border-left-color: transparent; }
+  .kdoc-content td[data-border~='r'], .kdoc-content th[data-border~='r'] { border-right-color: transparent; }
+  .kdoc-content td[data-border~='t'], .kdoc-content th[data-border~='t'] { border-top-color: transparent; }
+  .kdoc-content td[data-border~='b'], .kdoc-content th[data-border~='b'] { border-bottom-color: transparent; }
+}
+.print-page {
+  position: relative;
+  background: #fff;
+  overflow: hidden;
+  break-after: page;
+  page-break-after: always;
+}
+.print-page:last-child {
+  break-after: auto;
+  page-break-after: auto;
+}
+.print-page .print-body {
+  position: absolute;
+  overflow: hidden;
+}
+.print-page .print-body > .kdoc-content > * {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+.print-page .page-break::after,
+.print-page .pg-spacer {
+  display: none;
+}
+.print-page .selectedCell::after,
+.print-page .column-resize-handle {
+  display: none;
+}
+.print-page .search-match {
+  background: none !important;
+}
+.print-page .k-image-handle {
+  display: none !important;
+}
+.print-page .kdoc-content img {
+  outline: none !important;
+}

@@ -1,0 +1,14 @@
+import { load, readSample } from './harness.mjs';
+const m = await load('tests/formats.entry.ts');
+const file = process.argv[2];
+const t0 = Date.now();
+const doc = await (file.endsWith('.hwp') ? m.readHwp : m.readHwpx)(readSample(file));
+const blocks = doc.content.content;
+const count = {};
+const walk = (n) => { count[n.type] = (count[n.type] || 0) + 1; (n.content || []).forEach(walk); };
+walk(doc.content);
+console.log('ms', Date.now() - t0, 'settings', JSON.stringify(doc.settings));
+console.log('counts', JSON.stringify(count));
+console.log('warnings', doc.warnings);
+const text = (n) => n.type === 'text' ? n.text : (n.content || []).map(text).join(n.type === 'tableRow' ? ' | ' : '');
+for (const b of blocks.slice(0, +process.argv[3] || 25)) console.log(b.type, JSON.stringify(b.attrs || {}), '::', text(b).slice(0, 100));

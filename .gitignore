@@ -1,0 +1,8 @@
+node_modules
+dist
+dist-electron
+release
+*.log
+.playwright-mcp
+tests/.build
+tests/.prof
