@@ -10,6 +10,7 @@ import type { Node as PMNode } from '@tiptap/pm/model';
 import { NodeSelection, Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import { viewState } from '../viewState';
+import { normColor } from '../../formats/common';
 
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
@@ -326,9 +327,12 @@ export const KOrderedList = OrderedList.extend({
 const cellAttrs = {
   backgroundColor: {
     default: null,
-    parseHTML: (el: HTMLElement) => el.getAttribute('data-bg') || el.style.backgroundColor || null,
-    renderHTML: (a: Record<string, any>) =>
-      a.backgroundColor ? { 'data-bg': a.backgroundColor, style: `background-color: ${a.backgroundColor}` } : {},
+    // 색 값만 받는다 (HTML/붙여넣기로 들어온 임의 CSS 가 style 에 실리지 않도록)
+    parseHTML: (el: HTMLElement) => normColor(el.getAttribute('data-bg') || el.style.backgroundColor),
+    renderHTML: (a: Record<string, any>) => {
+      const c = normColor(a.backgroundColor);
+      return c ? { 'data-bg': c, style: `background-color: ${c}` } : {};
+    },
   },
   verticalAlign: {
     default: null,

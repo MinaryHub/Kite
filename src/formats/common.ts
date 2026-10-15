@@ -124,6 +124,28 @@ export function isBrowserImage(mime: string) {
 }
 
 // ---------- XML ----------
+/** ISO 8601 날짜만 통과 (문서 메타데이터를 XML 에 그대로 넣기 전에) */
+export function safeIsoDate(v: unknown, fallback: string): string {
+  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?(Z|[+-]\d{2}:?\d{2})?)?$/.test(v) ? v : fallback;
+}
+
+/** 불러올 수 있는 파일 크기 상한 (바이트) */
+export const MAX_IMPORT_BYTES = 300 * 1024 * 1024;
+/** 압축 파일(HWPX/DOCX) 안의 전체 풀린 크기 상한 */
+export const MAX_ZIP_UNCOMPRESSED = 600 * 1024 * 1024;
+
+/** 압축 폭탄 방어: 풀린 크기 합이 상한을 넘으면 거부 */
+export function assertZipBudget(zip: { files: Record<string, any> }) {
+  let total = 0;
+  let count = 0;
+  for (const f of Object.values(zip.files)) {
+    count++;
+    const n = f?._data?.uncompressedSize;
+    if (typeof n === 'number' && n > 0) total += n;
+    if (total > MAX_ZIP_UNCOMPRESSED || count > 20000) throw new Error('문서 안의 압축 데이터가 너무 큽니다.');
+  }
+}
+
 export function xmlEscape(s: string): string {
   return s
     .replace(/&/g, '&amp;')

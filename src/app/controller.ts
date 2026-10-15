@@ -1,7 +1,7 @@
 import { DocTab } from '../doc/docTab';
 import { platform } from '../platform';
 import { importDocument, exportDocument, SAVE_FORMATS, OPEN_FILTERS } from '../formats';
-import { baseName, splitExt } from '../formats/common';
+import { baseName, splitExt, MAX_IMPORT_BYTES } from '../formats/common';
 import type { SaveFormatId } from '../types';
 import { withPrintRoot } from '../print';
 import { viewState } from '../editor/viewState';
@@ -58,6 +58,29 @@ export interface PainterState {
 
 let toastSeq = 0;
 
+/** 파일 오류 코드를 사람이 읽을 수 있는 말로 */
+export function friendlyFsError(e: any): string {
+  const msg = String(e?.message || e || '');
+  const code = e?.code || (/\b(EPERM|EBUSY|EACCES|ENOSPC|ENOENT|EROFS|EISDIR|ENAMETOOLONG)\b/.exec(msg) || [])[1];
+  switch (code) {
+    case 'EPERM':
+    case 'EBUSY':
+      return '다른 프로그램에서 이 파일을 사용 중입니다. 그 프로그램에서 닫은 뒤 다시 저장하거나, 다른 이름으로 저장하세요.';
+    case 'EACCES':
+    case 'EROFS':
+      return '이 위치에 쓸 권한이 없습니다. 다른 폴더에 저장하세요.';
+    case 'ENOSPC':
+      return '디스크 공간이 부족합니다.';
+    case 'ENOENT':
+      return '폴더가 없거나 이동되었습니다. 다른 이름으로 저장하세요.';
+    case 'EISDIR':
+      return '폴더 이름과 같은 이름으로는 저장할 수 없습니다.';
+    case 'ENAMETOOLONG':
+      return '파일 이름이 너무 깁니다.';
+  }
+  return msg.replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+}
+
 export class AppController {
   docs: DocTab[] = [];
   activeId: string | null = null;
@@ -85,6 +108,8 @@ export class AppController {
   private listeners = new Set<() => void>();
   private untitledNo = 0;
   private autosaveTimer: any = null;
+  /** 원본을 덮어쓰기 전에 확인이 필요한 문서: 손실 경고가 있던 가져온 문서 / 복구된 문서 */
+  private overwriteConfirm = new Map<string, 'lossy' | 'recovered'>();
   private docUnsubs = new Map<string, () => void>();
 
   get active(): DocTab | null {
@@ -123,6 +148,13 @@ export class AppController {
     });
     platform.onOpenFiles((files) => files.forEach((f) => this.openPath(f)));
     platform.onRequestClose(() => this.requestQuit());
+    platform.onAutosaveNow(async () => {
+      try {
+        await this.autosaveNow();
+      } finally {
+        platform.autosaveFlushed();
+      }
+    });
     const initial = await platform.initialFiles();
     for (const f of initial) await this.openPath(f);
     await this.checkRecovery();
@@ -238,6 +270,10 @@ export class AppController {
   }
 
   async openData(name: string, data: Uint8Array, path: string | null) {
+    if (data.byteLength > MAX_IMPORT_BYTES) {
+      this.toast(`'${name}' 파일이 너무 큽니다 (${Math.round(data.byteLength / 1048576)}MB). ${Math.round(MAX_IMPORT_BYTES / 1048576)}MB 이하만 열 수 있습니다.`, 'error', 7000);
+      return;
+    }
     this.set({ busy: `'${name}' 불러오는 중…` });
     // 진행 표시가 그려지도록 한 프레임 양보
     await new Promise((r) => setTimeout(r, 30));
@@ -261,6 +297,8 @@ export class AppController {
       });
       if (loaded.format === 'pdf' || loaded.format === 'doc') tab.title = `${stem} (${loaded.format.toUpperCase()}에서 변환)`;
       if (replace && cur) this.closeTab(cur.id, true);
+      // 변환하면서 잃은 것이 있는 문서는 원본을 덮어쓰기 전에 한 번 확인한다
+      if (tab.path && tab.saveFormat && loaded.warnings.length) this.overwriteConfirm.set(tab.id, 'lossy');
       this.addDoc(tab);
       if (path) this.recent = await platform.addRecent(path);
       if (loaded.warnings.length) this.toast(loaded.warnings.slice(0, 2).join(' / '), 'warn', 6000);
@@ -275,6 +313,21 @@ export class AppController {
   async save(tab = this.active): Promise<boolean> {
     if (!tab) return false;
     if (!tab.path || !tab.saveFormat) return this.saveAs(tab);
+    const reason = this.overwriteConfirm.get(tab.id);
+    if (reason) {
+      const msg =
+        reason === 'recovered'
+          ? `'${baseName(tab.path)}' 은(는) 자동 저장본에서 복구한 문서입니다. 디스크의 파일이 더 새로울 수 있습니다. 원본을 덮어쓸까요?`
+          : `'${baseName(tab.path)}' 을(를) 불러올 때 일부 기능을 변환하지 못했습니다:\n${tab.warnings.slice(0, 3).join('\n')}\n\n이대로 원본을 덮어쓰면 그 내용이 사라집니다. 덮어쓸까요?`;
+      const r = await this.confirm('원본 덮어쓰기', msg, [
+        { id: 'saveAs', label: '다른 이름으로 저장', primary: true },
+        { id: 'overwrite', label: '덮어쓰기', danger: true },
+        { id: 'cancel', label: '취소' },
+      ]);
+      if (r === 'cancel') return false;
+      if (r === 'saveAs') return this.saveAs(tab);
+      this.overwriteConfirm.delete(tab.id);
+    }
     return this.writeTo(tab, tab.path, tab.saveFormat);
   }
 
@@ -290,8 +343,9 @@ export class AppController {
     const [, ext] = splitExt(target);
     const chosen = (SAVE_FORMATS.find((f) => f.ext === ext)?.id || fmt) as SaveFormatId;
     if (chosen === 'pdf') {
-      await this.exportPdf(tab);
-      return true;
+      // PDF 내보내기는 편집 가능한 저장이 아니다: 문서는 그대로 '수정됨' 으로 두어 닫을 때 다시 묻는다
+      await this.exportPdf(tab, target);
+      return false;
     }
     const finalPath = ext ? target : `${target}.${def.ext}`;
     return this.writeTo(tab, finalPath, chosen);
@@ -312,13 +366,14 @@ export class AppController {
         tab.saveFormat = format;
       }
       tab.markSaved();
+      this.overwriteConfirm.delete(tab.id);
       platform.autosaveRemove(tab.id);
       this.toast(`저장했습니다: ${baseName(path)}`);
       if (format === 'md' || format === 'txt' || format === 'html') this.toast('이 형식은 일부 서식(쪽 설정, 글꼴 등)이 저장되지 않습니다.', 'warn', 5000);
       return true;
     } catch (e: any) {
       console.error(e);
-      this.toast(`저장하지 못했습니다: ${e?.message || e}`, 'error', 7000);
+      this.toast(`저장하지 못했습니다: ${friendlyFsError(e)}`, 'error', 7000);
       return false;
     } finally {
       this.set({ busy: null });
@@ -326,15 +381,15 @@ export class AppController {
     }
   }
 
-  async exportPdf(tab = this.active) {
+  async exportPdf(tab = this.active, path?: string) {
     if (!tab) return;
     const [stem] = splitExt(tab.path ? baseName(tab.path) : tab.title);
     this.set({ busy: 'PDF 만드는 중…' });
     try {
-      const out = await withPrintRoot(tab, (g) => platform.printToPdf({ widthMm: g.wMm, heightMm: g.hMm, defaultPath: stem + '.pdf' }));
+      const out = await withPrintRoot(tab, (g) => platform.printToPdf({ widthMm: g.wMm, heightMm: g.hMm, defaultPath: stem + '.pdf', path }));
       if (out) this.toast(`PDF로 저장했습니다: ${baseName(out)}`);
     } catch (e: any) {
-      this.toast(`PDF 저장 실패: ${e?.message || e}`, 'error');
+      this.toast(`PDF 저장 실패: ${friendlyFsError(e)}`, 'error');
     } finally {
       this.set({ busy: null });
     }
@@ -390,12 +445,18 @@ export class AppController {
     this.autosaveTimer = setInterval(() => this.autosaveNow(), m * 60 * 1000);
   }
 
-  autosaveNow() {
+  private autosavedDoc = new WeakMap<DocTab, unknown>();
+  async autosaveNow() {
+    const jobs: Promise<unknown>[] = [];
     for (const d of this.docs) {
       if (!d.dirty) continue;
+      // 지난 자동 저장 뒤로 바뀐 것이 없으면 건너뛴다
+      if (this.autosavedDoc.get(d) === d.editor.state.doc) continue;
+      this.autosavedDoc.set(d, d.editor.state.doc);
       const json = JSON.stringify({ title: d.title, path: d.path, saveFormat: d.saveFormat, doc: d.toKDocument(), time: Date.now() });
-      platform.autosaveWrite(d.id, json);
+      jobs.push(Promise.resolve(platform.autosaveWrite(d.id, json)).catch(() => {}));
     }
+    await Promise.all(jobs);
   }
 
   private async checkRecovery() {
@@ -409,26 +470,32 @@ export class AppController {
         { id: 'no', label: '삭제', danger: true },
       ],
     );
+    let failed = 0;
     for (const item of list) {
       if (r === 'yes') {
         try {
           const data = JSON.parse(item.json);
+          if (!data?.doc?.content) throw new Error('empty');
           const tab = new DocTab({
             content: data.doc.content,
             settings: data.doc.settings,
             meta: data.doc.meta,
             title: data.title + ' (복구됨)',
-            path: data.path,
+            path: typeof data.path === 'string' ? data.path : null,
           });
           tab.saveFormat = data.saveFormat;
           tab.markDirty();
+          if (tab.path) this.overwriteConfirm.set(tab.id, 'recovered');
           this.addDoc(tab);
         } catch {
-          /* 무시 */
+          // 깨진 복구 파일은 지우지 않고 남겨 둔다 (유일한 사본일 수 있다)
+          failed++;
+          continue;
         }
       }
       platform.autosaveRemove(item.id);
     }
+    if (failed) this.toast(`복구 파일 ${failed}개를 읽지 못했습니다. 파일은 자동 저장 폴더에 그대로 두었습니다.`, 'warn', 8000);
   }
 
   // ---------------- 보기 ----------------

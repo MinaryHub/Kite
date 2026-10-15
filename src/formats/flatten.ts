@@ -1,4 +1,4 @@
-import { DEFAULT_FONT, DEFAULT_FONT_SIZE, type JMark, type JNode, formatNumber, toRoman } from './common';
+import { DEFAULT_FONT, DEFAULT_FONT_SIZE, type JMark, type JNode, formatNumber, normColor, toRoman } from './common';
 
 /**
  * 편집기 문서(JSON)를 한글/워드식 "문단 + 표" 구조로 평탄화한다.
@@ -151,7 +151,7 @@ function applyMarks(base: CharStyle, marks: JMark[] | undefined): { style: CharS
         s.font = 'D2Coding';
         break;
       case 'highlight':
-        s.highlight = m.attrs?.color || '#FFFF00';
+        s.highlight = normColor(m.attrs?.color) || '#FFFF00';
         break;
       case 'link':
         link = m.attrs?.href || null;
@@ -337,7 +337,7 @@ function flattenPara(n: JNode, ctx: Ctx, level: number): FlatPara {
   style.textIndent = a.textIndent || 0;
   style.spaceBefore = a.spaceBefore || 0;
   style.spaceAfter = a.spaceAfter || 0;
-  style.bg = a.paraBg || null;
+  style.bg = normColor(a.paraBg);
   style.heading = level;
   const base: CharStyle = { ...ctx.baseChar };
   if (level) {
@@ -394,7 +394,7 @@ function flattenTable(n: JNode, ctx: Ctx): FlatTable {
         colspan: cs,
         rowspan: rs,
         widthPx: cw ? cw.reduce((x: number, y: number) => x + (y || 0), 0) : 0,
-        bg: cell.attrs?.backgroundColor || null,
+        bg: normColor(cell.attrs?.backgroundColor),
         vAlign: va === 'top' ? 'top' : va === 'bottom' ? 'bottom' : 'middle',
         noBorders: cell.attrs?.borderStyle ? String(cell.attrs.borderStyle).split(/\s+/).filter(Boolean) : [],
         borderCss: cell.attrs?.borderCss || null,

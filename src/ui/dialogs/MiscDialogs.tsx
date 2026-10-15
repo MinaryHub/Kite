@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { NodeSelection } from '@tiptap/pm/state';
+import { platform } from '../../platform';
 import { cropOf, type Crop } from '../../editor/extensions/nodes';
 import { app } from '../../app/controller';
 import { commands } from '../../app/commands';
@@ -500,12 +501,16 @@ export function StyleDialog({ onClose }: { onClose: () => void }) {
 }
 
 export function AboutDialog({ onClose }: { onClose: () => void }) {
+  const [version, setVersion] = useState('');
+  useEffect(() => {
+    platform.version().then((v) => setVersion(v || ''));
+  }, []);
   return (
     <Modal title="Kite 정보" onClose={onClose} width={420} footer={<button className="btn primary" onClick={onClose}>확인</button>}>
       <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
         <img src="./icon.svg" alt="" style={{ width: 56, height: 56 }} />
         <div>
-          <div style={{ fontSize: 16, fontWeight: 700 }}>Kite 워드프로세서 0.1</div>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>Kite 워드프로세서 {version || ''}</div>
           <div className="unit">HWP · HWPX · DOCX · DOC · PDF · MD 문서 편집기</div>
         </div>
       </div>

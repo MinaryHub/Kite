@@ -18,11 +18,17 @@ export function sanitizeDoc(json: JNode, schema: Schema): PMNode {
   return doc;
 }
 
+export function isSafeHref(href: unknown): boolean {
+  return typeof href === 'string' && href.length < 4096 && /^(https?:|mailto:|tel:|#)/i.test(href.trim());
+}
+
 function marksOf(schema: Schema, marks?: { type: string; attrs?: any }[]): readonly Mark[] {
   const out: Mark[] = [];
   for (const m of marks || []) {
     const t = schema.marks[m.type];
     if (!t) continue;
+    // 링크는 http(s)/mailto/tel/문서 안 위치만 (javascript:, file:, UNC 경로 등 제외)
+    if (m.type === 'link' && !isSafeHref(m.attrs?.href)) continue;
     try {
       out.push(t.create(m.attrs));
     } catch {

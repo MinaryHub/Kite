@@ -25,7 +25,7 @@ async function getPdfjs(): Promise<any> {
 
 export async function readPdf(data: Uint8Array, onProgress?: (p: number) => void): Promise<LoadedDoc> {
   const pdfjs = await getPdfjs();
-  const pdf = await pdfjs.getDocument({ data: data.slice(), isEvalSupported: false, useSystemFonts: true, fontExtraProperties: true }).promise;
+  const pdf = await pdfjs.getDocument({ data: data.slice(), isEvalSupported: false, useSystemFonts: true, fontExtraProperties: true, maxImageSize: 50_000_000 }).promise;
   return convertPdf(pdf, pdfjs.OPS, (page, img) => loadImage(page, img), onProgress);
 }
 

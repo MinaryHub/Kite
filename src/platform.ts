@@ -107,7 +107,7 @@ export const platform = {
     return true;
   },
 
-  async printToPdf(opts: { widthMm: number; heightMm: number; defaultPath: string }): Promise<string | null> {
+  async printToPdf(opts: { widthMm: number; heightMm: number; defaultPath: string; path?: string }): Promise<string | null> {
     if (api) return api.printToPdf(opts);
     window.print();
     return null;
@@ -204,6 +204,19 @@ export const platform = {
   },
   onRequestClose(cb: () => void) {
     return api ? api.onRequestClose(cb) : () => {};
+  },
+  onAutosaveNow(cb: () => void) {
+    return api ? api.onAutosaveNow(cb) : () => {};
+  },
+  autosaveFlushed() {
+    api?.autosaveFlushed();
+  },
+  /** 끌어다 놓은 파일의 경로 (브라우저에서는 없음) */
+  droppedFilePath(file: File): string | null {
+    return api ? api.droppedFilePath(file) : null;
+  },
+  async version(): Promise<string> {
+    return api ? api.appVersion() : '';
   },
   closeConfirmed() {
     if (api) api.closeConfirmed();

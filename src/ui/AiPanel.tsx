@@ -78,7 +78,12 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
 
 export function renderMarkdown(md: string): string {
   const html = marked.parse(md, { gfm: true, breaks: true, async: false }) as string;
-  return DOMPurify.sanitize(html, { USE_PROFILES: { html: true }, FORBID_TAGS: ['style', 'form', 'iframe', 'object', 'embed', 'video', 'audio', 'source', 'link', 'meta'] });
+  return DOMPurify.sanitize(html, {
+    USE_PROFILES: { html: true },
+    FORBID_TAGS: ['style', 'form', 'iframe', 'object', 'embed', 'video', 'audio', 'source', 'link', 'meta', 'svg', 'math'],
+    // 인라인 CSS·대체 그림 주소 등으로 바깥에 요청이 나가지 않도록
+    FORBID_ATTR: ['style', 'srcset', 'poster', 'ping', 'formaction', 'background', 'target'],
+  });
 }
 
 /** 현재 문서 또는 선택 영역의 내용 (Markdown) */
@@ -300,6 +305,10 @@ export function AiPanel() {
       <div
         className="ai-list"
         ref={listRef}
+        // 가운데 버튼/보조 클릭은 확인 없이 새 창을 열려 하므로 막는다
+        onAuxClick={(e) => {
+          if ((e.target as HTMLElement).closest('a')) e.preventDefault();
+        }}
         onClick={(e) => {
           const a = (e.target as HTMLElement).closest('a');
           if (a) {

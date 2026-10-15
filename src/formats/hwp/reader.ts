@@ -1,5 +1,5 @@
 import * as CFB from 'cfb';
-import { inflateRaw, inflate } from 'pako';
+import { Inflate } from 'pako';
 import type { LoadedDoc } from '../../types';
 import {
   type JNode,
@@ -120,14 +120,38 @@ function ctrlIdOf(r: Rec): string {
   return String.fromCharCode((v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255);
 }
 
+const MAX_INFLATED = 256 * 1024 * 1024;
+/** 풀린 크기에 상한을 두는 inflate (압축률 1000:1 의 폭탄 방어) */
+function inflateCapped(data: Uint8Array, raw: boolean): Uint8Array {
+  const inf = new Inflate({ raw });
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  inf.onData = (chunk: Uint8Array) => {
+    total += chunk.length;
+    if (total > MAX_INFLATED) throw new Error('압축을 푼 데이터가 너무 큽니다.');
+    chunks.push(chunk);
+  };
+  inf.push(data, true);
+  if (inf.err) throw new Error(inf.msg || 'inflate 실패');
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) {
+    out.set(c, off);
+    off += c.length;
+  }
+  return out;
+}
+
 function decompress(data: Uint8Array, compressed: boolean): Uint8Array {
   if (!compressed) return data;
   try {
-    return inflateRaw(data);
-  } catch {
+    return inflateCapped(data, true);
+  } catch (e: any) {
+    if (/너무 큽니다/.test(String(e?.message))) throw e;
     try {
-      return inflate(data);
-    } catch {
+      return inflateCapped(data, false);
+    } catch (e2: any) {
+      if (/너무 큽니다/.test(String(e2?.message))) throw e2;
       return data;
     }
   }
@@ -689,11 +713,15 @@ export function assembleTable(
   /** 원래 줄 번호별 줄 높이(px, 최소 높이) */
   rowHeights: (number | null)[] = [],
 ): JNode {
-  // 잘못된 값 방어: 칸/줄 합치기 범위를 표 크기 안으로 제한
-  const maxCols = nColsDecl > 0 ? nColsDecl : 512;
-  cells = cells.filter((c) => c.col < maxCols && c.row < Math.max(nRowsDecl, 1) + 4096);
+  // 잘못된 값 방어: 칸/줄 합치기 범위를 표 크기 안으로 제한 (선언된 줄 수가 없어도 절대 상한을 둔다)
+  const MAX_ROWS = 4096;
+  const maxCols = nColsDecl > 0 ? Math.min(nColsDecl, 512) : 512;
+  const maxRows = Math.min(MAX_ROWS, Math.max(nRowsDecl, 1) + MAX_ROWS);
+  cells = cells.filter((c) => c.col >= 0 && c.row >= 0 && c.col < maxCols && c.row < maxRows);
+  if (cells.length > 200000) cells = cells.slice(0, 200000);
   for (const c of cells) {
-    if (c.col + c.cs > maxCols) c.cs = Math.max(1, maxCols - c.col);
+    c.cs = Math.max(1, Math.min(c.cs | 0, maxCols - c.col));
+    c.rs = Math.max(1, Math.min(c.rs | 0, maxRows - c.row));
     if (nRowsDecl > 0 && c.row + c.rs > nRowsDecl) c.rs = Math.max(1, nRowsDecl - c.row);
     if (!isFinite(c.w) || c.w > 5000) c.w = 0;
     c.node.attrs!.colspan = c.cs;

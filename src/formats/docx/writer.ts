@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
 import type { KDocument } from '../../types';
-import { type JNode, mmToTwip, xmlEscape, parseBorderCss } from '../common';
+import { type JNode, mmToTwip, xmlEscape, parseBorderCss, normColor, safeIsoDate } from '../common';
 import { type CharStyle, type FlatBlock, type FlatPara, type FlatTable, type ParaStyle, flattenDoc } from '../flatten';
 import { prepareImage } from '../imageUtil';
 
@@ -9,7 +9,11 @@ import { prepareImage } from '../imageUtil';
 const W_NS =
   'xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:w10="urn:schemas-microsoft-com:office:word" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wne="http://schemas.microsoft.com/office/word/2006/wordml" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"';
 const DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
-const hex = (c: string) => c.replace('#', '').toUpperCase();
+/** 색 값을 RRGGBB 로 (색이 아니면 auto) */
+const hex = (c: string) => {
+  const n = normColor(c);
+  return n ? n.slice(1) : 'auto';
+};
 
 class Ctx {
   rels: { id: string; type: string; target: string; external?: boolean }[] = [];
@@ -353,7 +357,7 @@ export async function writeDocx(doc: KDocument): Promise<Uint8Array> {
     DECL +
     `<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">` +
     `<dc:title>${xmlEscape(doc.meta.title || '')}</dc:title><dc:subject>${xmlEscape(doc.meta.subject || '')}</dc:subject><dc:creator>${xmlEscape(doc.meta.author || '')}</dc:creator><cp:keywords>${xmlEscape(doc.meta.keywords || '')}</cp:keywords>` +
-    `<dcterms:created xsi:type="dcterms:W3CDTF">${doc.meta.created && /^\d{4}-/.test(doc.meta.created) ? doc.meta.created : now}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${now}</dcterms:modified></cp:coreProperties>`;
+    `<dcterms:created xsi:type="dcterms:W3CDTF">${safeIsoDate(doc.meta.created, now)}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${now}</dcterms:modified></cp:coreProperties>`;
 
   const zip = new JSZip();
   zip.file('[Content_Types].xml', contentTypes);

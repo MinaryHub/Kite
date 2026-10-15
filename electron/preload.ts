@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 const api = {
   platform: 'electron' as const,
@@ -7,7 +7,6 @@ const api = {
   readFile: (p: string): Promise<Uint8Array> => ipcRenderer.invoke('file:read', p),
   saveDialog: (defaultPath: string, filters: any): Promise<string | null> => ipcRenderer.invoke('file:save-dialog', defaultPath, filters),
   writeFile: (p: string, data: Uint8Array): Promise<boolean> => ipcRenderer.invoke('file:write', p, data),
-  exists: (p: string): Promise<boolean> => ipcRenderer.invoke('file:exists', p),
   imageDialog: (): Promise<{ name: string; data: Uint8Array }[]> => ipcRenderer.invoke('file:image-dialog'),
   showItemInFolder: (p: string) => ipcRenderer.invoke('shell:show-item', p),
   openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url),
@@ -19,14 +18,34 @@ const api = {
   autosaveWrite: (id: string, json: string) => ipcRenderer.invoke('autosave:write', id, json),
   autosaveRemove: (id: string) => ipcRenderer.invoke('autosave:remove', id),
   autosaveList: (): Promise<{ id: string; json: string; mtime: number }[]> => ipcRenderer.invoke('autosave:list'),
-  printToPdf: (opts: { widthMm: number; heightMm: number; defaultPath: string }): Promise<string | null> => ipcRenderer.invoke('print:pdf', opts),
+  /** 주 프로세스가 '지금 자동 저장' 을 요청할 때 */
+  onAutosaveNow: (cb: () => void) => {
+    const h = () => cb();
+    ipcRenderer.on('app:autosave-now', h);
+    return () => {
+      ipcRenderer.removeListener('app:autosave-now', h);
+    };
+  },
+  autosaveFlushed: () => ipcRenderer.send('autosave:flushed'),
+  /** 끌어다 놓은 File 의 실제 경로 (없으면 null). 주 프로세스에 그 경로를 허용해 달라고 알린다 */
+  droppedFilePath: (file: File): string | null => {
+    let p = '';
+    try {
+      p = webUtils.getPathForFile(file);
+    } catch {
+      p = '';
+    }
+    if (p) ipcRenderer.send('file:dropped', p);
+    return p || null;
+  },
+  appVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
+  printToPdf: (opts: { widthMm: number; heightMm: number; defaultPath: string; path?: string }): Promise<string | null> => ipcRenderer.invoke('print:pdf', opts),
   print: (opts: { widthMm: number; heightMm: number; landscape: boolean }): Promise<boolean> => ipcRenderer.invoke('print:print', opts),
   paste: () => ipcRenderer.invoke('edit:paste'),
   pastePlain: () => ipcRenderer.invoke('edit:paste-plain'),
   setTitle: (t: string) => ipcRenderer.invoke('app:set-title', t),
   closeConfirmed: () => ipcRenderer.invoke('app:close-confirmed'),
   toggleFullscreen: () => ipcRenderer.invoke('app:toggle-fullscreen'),
-  toggleDevtools: () => ipcRenderer.invoke('app:devtools'),
   listFonts: (): Promise<string[]> => ipcRenderer.invoke('fonts:list'),
   convertDoc: (data: Uint8Array): Promise<any> => ipcRenderer.invoke('doc:convert', data),
   aiKeyStatus: (): Promise<Record<'claude' | 'openai' | 'gemini', 'saved' | 'env' | 'none'>> => ipcRenderer.invoke('ai:key-status'),

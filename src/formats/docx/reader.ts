@@ -22,6 +22,7 @@ import {
   round,
   textNode,
   twipToMm,
+  assertZipBudget,
 } from '../common';
 import { assembleTable } from '../hwp/reader';
 
@@ -810,13 +811,13 @@ class DocxReader {
       const trH = kid(trPr, 'trHeight');
       // 정확한 높이(exact)와 최소 높이(atLeast) 모두 최소 높이로 쓴다
       if (trH && attr(trH, 'hRule') !== 'auto') rowH[rowIdx] = parseFloat(attr(trH, 'val') || '0') / 15 || 0;
-      const gridBefore = parseInt(attr(kid(trPr, 'gridBefore'), 'val') || '0', 10);
+      const gridBefore = Math.max(0, Math.min(512, parseInt(attr(kid(trPr, 'gridBefore'), 'val') || '0', 10) || 0));
       col += gridBefore;
       for (const tc of kids(tr).filter((e) => localName(e) === 'tc' || localName(e) === 'sdt')) {
         const tcEl = localName(tc) === 'sdt' ? kid(kid(tc, 'sdtContent'), 'tc') : tc;
         if (!tcEl) continue;
         const tcPr = kid(tcEl, 'tcPr');
-        const span = parseInt(attr(kid(tcPr, 'gridSpan'), 'val') || '1', 10);
+        const span = Math.max(1, Math.min(512, parseInt(attr(kid(tcPr, 'gridSpan'), 'val') || '1', 10) || 1));
         const vm = kid(tcPr, 'vMerge');
         const vmVal = vm ? attr(vm, 'val') || 'continue' : null;
         if (vmVal === 'continue') {
@@ -995,6 +996,7 @@ function normalizePath(p: string): string {
 
 export async function readDocx(data: Uint8Array): Promise<LoadedDoc> {
   const zip = await JSZip.loadAsync(data);
+  assertZipBudget(zip);
   let docPath = 'word/document.xml';
   const rootRels = await zip.file('_rels/.rels')?.async('string');
   if (rootRels) {

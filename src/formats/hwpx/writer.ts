@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
 import type { KDocument } from '../../types';
-import { type JNode, mmToHwp, pxToHwp, ptToHwp, xmlEscape, parseBorderCss } from '../common';
+import { type JNode, mmToHwp, pxToHwp, ptToHwp, xmlEscape, parseBorderCss, normColor, safeIsoDate } from '../common';
 import {
   type CharStyle,
   type FlatBlock,
@@ -378,7 +378,7 @@ function headerXml(reg: Registry): string {
       let x = `<hh:borderFill id="${i + 1}" threeD="0" shadow="0" centerLine="NONE" breakCellSeparateLine="0"><hh:slash type="NONE" Crooked="0" isCounter="0"/><hh:backSlash type="NONE" Crooked="0" isCounter="0"/>`;
       x += side('leftBorder', 'l') + side('rightBorder', 'r') + side('topBorder', 't') + side('bottomBorder', 'b');
       x += `<hh:diagonal type="SOLID" width="0.1 mm" color="#000000"/>`;
-      if (b.bg) x += `<hc:fillBrush><hc:winBrush faceColor="${b.bg}" hatchColor="#999999" alpha="0"/></hc:fillBrush>`;
+      if (b.bg) x += `<hc:fillBrush><hc:winBrush faceColor="${normColor(b.bg) || 'none'}" hatchColor="#999999" alpha="0"/></hc:fillBrush>`;
       else if (i === 1) x += `<hc:fillBrush><hc:winBrush faceColor="none" hatchColor="#999999" alpha="0"/></hc:fillBrush>`;
       return x + '</hh:borderFill>';
     })
@@ -387,7 +387,7 @@ function headerXml(reg: Registry): string {
   const charXml = reg.chars
     .map((c, i) => {
       const f = reg.font(c.font);
-      let x = `<hh:charPr id="${i}" height="${ptToHwp(c.size)}" textColor="${c.color}" shadeColor="${c.highlight || 'none'}" useFontSpace="0" useKerning="0" symMark="NONE" borderFillIDRef="2">`;
+      let x = `<hh:charPr id="${i}" height="${ptToHwp(c.size)}" textColor="${normColor(c.color) || '#000000'}" shadeColor="${normColor(c.highlight) || 'none'}" useFontSpace="0" useKerning="0" symMark="NONE" borderFillIDRef="2">`;
       x += `<hh:fontRef ${langAttrs(f)}/><hh:ratio ${langAttrs(c.fontWidth || 100)}/><hh:spacing ${langAttrs(Math.round(c.letterSpacing || 0))}/><hh:relSz ${langAttrs(100)}/><hh:offset ${langAttrs(0)}/>`;
       if (c.italic) x += '<hh:italic/>';
       if (c.bold) x += '<hh:bold/>';
@@ -529,7 +529,7 @@ export async function writeHwpx(doc: KDocument, opts: { pageCount?: number } = {
     `<opf:package ${NS} version="" unique-identifier="" id=""><opf:metadata><opf:title>${xmlEscape(meta.title || '')}</opf:title><opf:language>ko</opf:language>` +
     `<opf:meta name="creator" content="text">${xmlEscape(meta.author || '')}</opf:meta><opf:meta name="subject" content="text">${xmlEscape(meta.subject || '')}</opf:meta>` +
     `<opf:meta name="description" content="text"/><opf:meta name="lastsaveby" content="text">${xmlEscape(meta.author || '')}</opf:meta>` +
-    `<opf:meta name="CreatedDate" content="text">${meta.created || now}</opf:meta><opf:meta name="ModifiedDate" content="text">${now}</opf:meta>` +
+    `<opf:meta name="CreatedDate" content="text">${safeIsoDate(meta.created, now)}</opf:meta><opf:meta name="ModifiedDate" content="text">${now}</opf:meta>` +
     `<opf:meta name="keyword" content="text">${xmlEscape(meta.keywords || '')}</opf:meta></opf:metadata>` +
     `<opf:manifest>${manifestItems}</opf:manifest><opf:spine><opf:itemref idref="header" linear="yes"/><opf:itemref idref="section0" linear="yes"/></opf:spine></opf:package>`;
 

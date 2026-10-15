@@ -1,5 +1,6 @@
 import { Extension } from '@tiptap/core';
 import { cssToPt, normLineHeight, r2 } from '../cssUnits';
+import { normColor } from '../../formats/common';
 
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
@@ -104,9 +105,11 @@ export const ParagraphFormat = Extension.create({
           },
           paraBg: {
             default: null,
-            parseHTML: (el: HTMLElement) => el.getAttribute('data-bg') || null,
-            renderHTML: (attrs: Record<string, any>) =>
-              attrs.paraBg ? { 'data-bg': attrs.paraBg, style: `background-color: ${attrs.paraBg}` } : {},
+            parseHTML: (el: HTMLElement) => normColor(el.getAttribute('data-bg')),
+            renderHTML: (attrs: Record<string, any>) => {
+              const c = normColor(attrs.paraBg);
+              return c ? { 'data-bg': c, style: `background-color: ${c}` } : {};
+            },
           },
           /** 빈 문단의 높이 유지를 위한 문단 기본 글자 크기(pt) */
           fontSize: {

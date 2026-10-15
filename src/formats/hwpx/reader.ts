@@ -31,6 +31,7 @@ import {
   normCrop,
   type BorderSide,
   applyNumFormat,
+  assertZipBudget,
 } from '../common';
 
 // ---------------- 헤더(스타일 정의) ----------------
@@ -660,8 +661,8 @@ export class HwpxConverter {
         const sub = kid(tc, 'subList');
         const row = addr ? numAttr(addr, 'rowAddr', ri) : ri;
         const col = addr ? numAttr(addr, 'colAddr', ci) : ci;
-        const cs = Math.max(1, numAttr(span, 'colSpan', 1));
-        const rs = Math.max(1, numAttr(span, 'rowSpan', 1));
+        const cs = Math.max(1, Math.min(512, numAttr(span, 'colSpan', 1)));
+        const rs = Math.max(1, Math.min(4096, numAttr(span, 'rowSpan', 1)));
         const w = hwpToPx(numAttr(sz, 'width', 0));
         if (rs === 1) rowH[row] = Math.max(rowH[row] || 0, hwpToPx(numAttr(sz, 'height', 0) - CELL_VMARGIN_HWP));
         const bf = this.h.borderFills.get(attr(tc, 'borderFillIDRef') || '');
@@ -700,6 +701,7 @@ async function zipText(zip: JSZip, path: string): Promise<string | null> {
 
 export async function readHwpx(data: Uint8Array): Promise<LoadedDoc> {
   const zip = await JSZip.loadAsync(data);
+  assertZipBudget(zip);
   const warnings: string[] = [];
   let hpfPath = 'Contents/content.hpf';
   const containerXml = await zipText(zip, 'META-INF/container.xml');

@@ -6,6 +6,7 @@ import Color from '@tiptap/extension-color';
 import FontFamily from '@tiptap/extension-font-family';
 import { fontStack } from '../fonts';
 import Highlight from '@tiptap/extension-highlight';
+import { normColor } from '../formats/common';
 import Subscript from '@tiptap/extension-subscript';
 import Superscript from '@tiptap/extension-superscript';
 import Link from '@tiptap/extension-link';
@@ -60,7 +61,21 @@ export function getExtensions(): AnyExtension[] {
         ];
       },
     }),
-    Highlight.configure({ multicolor: true }),
+    // 형광펜 색도 색 값만 받는다
+    Highlight.extend({
+      addAttributes() {
+        return {
+          color: {
+            default: null,
+            parseHTML: (el: HTMLElement) => normColor(el.getAttribute('data-color') || el.style.backgroundColor),
+            renderHTML: (a: Record<string, any>) => {
+              const c = normColor(a.color);
+              return c ? { 'data-color': c, style: `background-color: ${c}; color: inherit` } : {};
+            },
+          },
+        };
+      },
+    }).configure({ multicolor: true }),
     Subscript,
     Superscript,
     Link.configure({ openOnClick: false, autolink: true, HTMLAttributes: { rel: null, target: null } }),

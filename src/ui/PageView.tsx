@@ -9,6 +9,7 @@ import { applyFormatPainter, insertImagesFromFiles } from '../app/commands';
 import { viewState } from '../editor/viewState';
 import { FN_FONT_PX, FN_LINE, FN_SEP } from '../editor/extensions/pagination';
 import { showContextMenu } from './ContextMenu';
+import { platform } from '../platform';
 
 export function PageView({ tab, active }: { tab: DocTab; active: boolean }) {
   const app = useApp();
@@ -143,7 +144,7 @@ export function PageView({ tab, active }: { tab: DocTab; active: boolean }) {
     for (const f of docs) {
       const [, ext] = splitExt(f.name);
       if (!/^(hwp|hwpx|docx|doc|pdf|md|markdown|txt|html?)$/.test(ext)) continue;
-      await app.openData(f.name, new Uint8Array(await f.arrayBuffer()), (f as any).path || null);
+      await app.openData(f.name, new Uint8Array(await f.arrayBuffer()), platform.droppedFilePath(f));
     }
   };
 

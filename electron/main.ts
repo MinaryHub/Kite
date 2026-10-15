@@ -11,8 +11,34 @@ const pendingFiles: string[] = [];
 
 const DOC_EXT = /\.(hwp|hwpx|docx|doc|pdf|md|markdown|txt|html?)$/i;
 
+/** 로컬 절대 경로만 (네트워크 공유 \\server\share 는 열지 않는다: 접속/인증 시도를 막기 위해) */
+function isLocalAbsolute(p: unknown): p is string {
+  return typeof p === 'string' && p.length > 0 && p.length < 4096 && path.isAbsolute(p) && !/^[\\/]{2}/.test(p) && !p.includes('\0');
+}
+
 function filesFromArgv(argv: string[]): string[] {
-  return argv.slice(1).filter((a) => !a.startsWith('-') && DOC_EXT.test(a) && fs.existsSync(a));
+  const out: string[] = [];
+  for (const a of argv.slice(1)) {
+    if (a.startsWith('-') || !DOC_EXT.test(a)) continue;
+    const abs = path.resolve(a);
+    if (!isLocalAbsolute(abs) || !fs.existsSync(abs)) continue;
+    allowPath(abs);
+    out.push(abs);
+  }
+  return out;
+}
+
+// ---------------- 경로 허용 목록 ----------------
+// 렌더러(문서 파서가 도는 곳)가 임의 경로를 읽고 쓰지 못하도록, 주 프로세스가 직접 알게 된 경로만 허용한다:
+// 열기/저장 대화상자 결과, 실행 인자, 최근 문서 목록, 자동 저장에 기록된 문서 경로.
+const allowedPaths = new Set<string>();
+const pathKey = (p: string) => path.resolve(p).toLowerCase();
+function allowPath(p: string) {
+  if (isLocalAbsolute(p)) allowedPaths.add(pathKey(p));
+}
+function assertAllowed(p: unknown, what: string): string {
+  if (!isLocalAbsolute(p) || !allowedPaths.has(pathKey(p))) throw new Error(`${what}: 허용되지 않은 경로입니다.`);
+  return p;
 }
 
 // 예전 이름(K-HWP) 때의 설정 폴더(최근 문서·환경 설정·자동 저장·AI 키)를 새 폴더로 옮긴다.
@@ -80,6 +106,9 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
       spellcheck: true,
     },
   });
@@ -98,7 +127,7 @@ function createWindow() {
       setTimeout(async () => {
         try {
           const r = await mainWindow!.webContents.executeJavaScript(
-            `(async () => { const d = [...document.querySelectorAll('.doc-tab .dt-title')].map(e => e.textContent); const ai = window.kite ? await window.kite.aiKeyStatus() : null; return JSON.stringify({ tabs: d, pages: document.querySelectorAll('.workspace:not(.hidden-doc) .paper').length, title: document.title, hasApi: !!window.kite, ai }); })()`,
+            `(async () => { const d = [...document.querySelectorAll('.doc-tab .dt-title')].map(e => e.textContent); const ai = window.kite ? await window.kite.aiKeyStatus() : null; let readDenied = false; try { await window.kite.readFile('C:\\Windows\\win.ini'); } catch { readDenied = true; } let writeDenied = false; try { await window.kite.writeFile('C:\\Windows\\Temp\\kite-smoke-x.txt', new Uint8Array(1)); } catch { writeDenied = true; } return JSON.stringify({ tabs: d, pages: document.querySelectorAll('.workspace:not(.hidden-doc) .paper').length, title: document.title, hasApi: !!window.kite, ai, readDenied, writeDenied }); })()`,
           );
           fs.writeFileSync(process.env.KITE_SMOKE!, 'SMOKE ' + r);
         } catch (e) {
@@ -115,20 +144,58 @@ function createWindow() {
     mainWindow?.webContents.send('app:request-close');
   });
   mainWindow.on('closed', () => (mainWindow = null));
-  // 앱 화면은 다른 주소로 이동하지 않는다 (AI 응답 속 링크 등은 외부 브라우저로)
-  mainWindow.webContents.on('will-navigate', (e, url) => {
-    if (url !== mainWindow?.webContents.getURL()) {
-      e.preventDefault();
-      if (/^https?:/.test(url)) shell.openExternal(url);
+  // Windows 로그오프/시스템 종료: 물어볼 시간이 없으므로 바로 자동 저장만 하고 끝낸다
+  mainWindow.on('session-end' as any, async () => {
+    await flushAutosave();
+    forceClose = true;
+    app.exit(0);
+  });
+  // 편집 화면이 죽었을 때: 자동 저장 파일은 남아 있으므로 다시 열어 복구를 제안한다
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    if (details.reason === 'clean-exit' || !mainWindow) return;
+    const r = dialog.showMessageBoxSync(mainWindow, {
+      type: 'error',
+      title: 'Kite',
+      message: '편집 화면이 비정상적으로 종료되었습니다.',
+      detail: `원인: ${details.reason}\n다시 열면 자동 저장된 문서를 복구할 수 있습니다.`,
+      buttons: ['다시 열기', '끝내기'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (r === 0) mainWindow.reload();
+    else {
+      forceClose = true;
+      app.exit(1);
     }
   });
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/.test(url)) shell.openExternal(url);
-    return { action: 'deny' };
+  mainWindow.on('unresponsive', () => {
+    if (!mainWindow) return;
+    const r = dialog.showMessageBoxSync(mainWindow, {
+      type: 'warning',
+      title: 'Kite',
+      message: '응답이 없습니다. 큰 문서를 처리하는 중일 수 있습니다.',
+      buttons: ['기다리기', '강제 종료'],
+      defaultId: 0,
+      cancelId: 0,
+    });
+    if (r === 1) {
+      forceClose = true;
+      app.exit(1);
+    }
   });
-  mainWindow.webContents.on('before-input-event', (_e, input) => {
-    if (input.type === 'keyDown' && input.key === 'F12') mainWindow?.webContents.toggleDevTools();
+  // 앱 화면은 다른 주소로 이동하지 않는다 (AI 응답 속 링크 등은 외부 브라우저로)
+  // 앱 화면은 다른 주소로 이동하지 않고 새 창도 열지 않는다.
+  // 링크는 렌더러가 확인을 거쳐 shell:open-external 로만 연다 (가운데 클릭 등으로 확인을 건너뛰지 못하게).
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    if (url !== mainWindow?.webContents.getURL()) e.preventDefault();
   });
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  // 개발자 도구는 개발 모드(또는 KITE_DEBUG)에서만
+  if (isDev || process.env.KITE_DEBUG) {
+    mainWindow.webContents.on('before-input-event', (_e, input) => {
+      if (input.type === 'keyDown' && input.key === 'F12') mainWindow?.webContents.toggleDevTools();
+    });
+  }
   try {
     session.defaultSession.setSpellCheckerLanguages(['en-US']);
   } catch {
@@ -137,6 +204,11 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // 웹 권한(카메라·마이크·위치·알림 등)은 쓰지 않으므로 모두 거부한다
+  const ALLOWED_PERMISSIONS = new Set(['clipboard-sanitized-write', 'fullscreen']);
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(ALLOWED_PERMISSIONS.has(permission)));
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => ALLOWED_PERMISSIONS.has(permission));
+  sweepStaleTemp();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -145,6 +217,31 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+// 창 닫기 외의 종료 요청(앱 메뉴, 시스템)도 저장 확인을 거친다
+app.on('before-quit', (e) => {
+  if (forceClose || !mainWindow || mainWindow.isDestroyed()) return;
+  e.preventDefault();
+  mainWindow.webContents.send('app:request-close');
+});
+
+/** 렌더러에 자동 저장을 요청하고 끝날 때까지(최대 2초) 기다린다 */
+function flushAutosave(): Promise<void> {
+  return new Promise((resolve) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return resolve();
+    const timer = setTimeout(resolve, 2000);
+    ipcMain.once('autosave:flushed', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    mainWindow.webContents.send('app:autosave-now');
+  });
+}
+
+// 끌어다 놓은 파일: preload 가 실제 File 객체에서 얻은 경로만 들어온다 (렌더러가 임의 문자열을 보낼 수 없다)
+ipcMain.on('file:dropped', (_e, p: unknown) => {
+  if (isLocalAbsolute(p) && DOC_EXT.test(p)) allowPath(p);
 });
 
 // ---------------- 파일 ----------------
@@ -163,28 +260,37 @@ ipcMain.handle('file:open-dialog', async (_e, filters) => {
     filters,
   });
   if (res.canceled) return [];
+  res.filePaths.forEach(allowPath);
   return res.filePaths;
 });
 
 ipcMain.handle('file:read', async (_e, p: string) => {
-  const buf = await fs.promises.readFile(p);
+  const buf = await fs.promises.readFile(assertAllowed(p, '읽기'));
   return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 });
 
 ipcMain.handle('file:save-dialog', async (_e, defaultPath: string, filters) => {
-  const res = await dialog.showSaveDialog(mainWindow!, { title: '다른 이름으로 저장', defaultPath, filters });
-  return res.canceled ? null : res.filePath;
+  const res = await dialog.showSaveDialog(mainWindow!, { title: '다른 이름으로 저장', defaultPath: typeof defaultPath === 'string' ? defaultPath : undefined, filters });
+  if (res.canceled || !res.filePath) return null;
+  allowPath(res.filePath);
+  return res.filePath;
 });
 
+const MAX_WRITE = 512 * 1024 * 1024;
 ipcMain.handle('file:write', async (_e, p: string, data: Uint8Array) => {
-  // 안전한 저장: 임시 파일에 쓴 뒤 교체
-  const tmp = p + '.kite-tmp';
-  await fs.promises.writeFile(tmp, Buffer.from(data));
-  await fs.promises.rename(tmp, p);
+  const target = assertAllowed(p, '저장');
+  if (!(data instanceof Uint8Array) || data.byteLength > MAX_WRITE) throw new Error('저장할 내용이 올바르지 않습니다.');
+  // 안전한 저장: 임시 파일에 쓴 뒤 교체. 실패하면 임시 파일을 남기지 않는다
+  const tmp = target + '.kite-tmp';
+  try {
+    await fs.promises.writeFile(tmp, Buffer.from(data));
+    await fs.promises.rename(tmp, target);
+  } catch (e) {
+    await fs.promises.unlink(tmp).catch(() => {});
+    throw e;
+  }
   return true;
 });
-
-ipcMain.handle('file:exists', (_e, p: string) => fs.existsSync(p));
 
 ipcMain.handle('file:image-dialog', async () => {
   const res = await dialog.showOpenDialog(mainWindow!, {
@@ -201,22 +307,27 @@ ipcMain.handle('file:image-dialog', async () => {
   );
 });
 
-ipcMain.handle('shell:show-item', (_e, p: string) => shell.showItemInFolder(p));
+ipcMain.handle('shell:show-item', (_e, p: string) => shell.showItemInFolder(assertAllowed(p, '폴더 열기')));
 ipcMain.handle('shell:open-external', (_e, url: string) => {
-  if (/^(https?|mailto):/i.test(url)) shell.openExternal(url);
+  if (typeof url === 'string' && url.length < 2048 && /^(https?|mailto):/i.test(url)) shell.openExternal(url);
 });
 
 // ---------------- 최근 문서 ----------------
 const recentPath = () => path.join(userData(), 'recent.json');
 function readRecent(): string[] {
   try {
-    return JSON.parse(fs.readFileSync(recentPath(), 'utf8')).filter((p: string) => fs.existsSync(p));
+    const raw = JSON.parse(fs.readFileSync(recentPath(), 'utf8'));
+    const list: string[] = Array.isArray(raw) ? raw.filter((p: unknown) => isLocalAbsolute(p) && fs.existsSync(p)) : [];
+    list.forEach(allowPath);
+    return list;
   } catch {
     return [];
   }
 }
 ipcMain.handle('recent:get', () => readRecent());
 ipcMain.handle('recent:add', (_e, p: string) => {
+  // 이미 열거나 저장한(허용된) 경로만 최근 목록에 넣는다
+  assertAllowed(p, '최근 문서');
   const list = [p, ...readRecent().filter((x) => x !== p)].slice(0, 15);
   fs.mkdirSync(userData(), { recursive: true });
   fs.writeFileSync(recentPath(), JSON.stringify(list));
@@ -246,8 +357,11 @@ ipcMain.handle('prefs:get', () => {
   }
 });
 ipcMain.handle('prefs:set', (_e, prefs) => {
+  if (!prefs || typeof prefs !== 'object' || Array.isArray(prefs)) throw new Error('설정 형식이 올바르지 않습니다.');
+  const json = JSON.stringify(prefs, null, 2);
+  if (json.length > 64 * 1024) throw new Error('설정이 너무 큽니다.');
   fs.mkdirSync(userData(), { recursive: true });
-  fs.writeFileSync(prefsPath(), JSON.stringify(prefs, null, 2));
+  fs.writeFileSync(prefsPath(), json);
   try {
     session.defaultSession.setSpellCheckerLanguages(prefs.spellcheck ? ['en-US'] : []);
   } catch {
@@ -258,14 +372,24 @@ ipcMain.handle('prefs:set', (_e, prefs) => {
 
 // ---------------- 자동 저장 / 복구 ----------------
 const autosaveDir = () => path.join(userData(), 'autosave');
+/** 자동 저장 id 는 docTab 이 만드는 형식만 (경로 조작 방지) */
+function autosaveFile(id: unknown): string {
+  if (typeof id !== 'string' || !/^doc-[a-z0-9]{1,24}-\d{1,9}$/.test(id)) throw new Error('자동 저장 id 가 올바르지 않습니다.');
+  return path.join(autosaveDir(), `${id}.json`);
+}
 ipcMain.handle('autosave:write', async (_e, id: string, json: string) => {
+  const file = autosaveFile(id);
+  if (typeof json !== 'string' || json.length > 256 * 1024 * 1024) throw new Error('자동 저장 내용이 올바르지 않습니다.');
   await fs.promises.mkdir(autosaveDir(), { recursive: true });
-  await fs.promises.writeFile(path.join(autosaveDir(), `${id}.json`), json, 'utf8');
+  // 쓰는 도중 꺼져도 깨진 복구 파일이 남지 않도록 임시 파일에 쓴 뒤 교체
+  const tmp = file + '.tmp';
+  await fs.promises.writeFile(tmp, json, 'utf8');
+  await fs.promises.rename(tmp, file);
   return true;
 });
 ipcMain.handle('autosave:remove', async (_e, id: string) => {
   try {
-    await fs.promises.unlink(path.join(autosaveDir(), `${id}.json`));
+    await fs.promises.unlink(autosaveFile(id));
   } catch {
     /* 무시 */
   }
@@ -279,7 +403,15 @@ ipcMain.handle('autosave:list', async () => {
       if (!f.endsWith('.json')) continue;
       const p = path.join(autosaveDir(), f);
       const st = await fs.promises.stat(p);
-      out.push({ id: f.replace(/\.json$/, ''), json: await fs.promises.readFile(p, 'utf8'), mtime: st.mtimeMs });
+      const json = await fs.promises.readFile(p, 'utf8');
+      // 복구된 문서를 원래 자리에 다시 저장할 수 있도록 기록된 경로를 허용한다
+      try {
+        const docPath = JSON.parse(json)?.path;
+        if (isLocalAbsolute(docPath)) allowPath(docPath);
+      } catch {
+        /* 무시 */
+      }
+      out.push({ id: f.replace(/\.json$/, ''), json, mtime: st.mtimeMs });
     }
     return out;
   } catch {
@@ -288,14 +420,22 @@ ipcMain.handle('autosave:list', async () => {
 });
 
 // ---------------- 인쇄 / PDF ----------------
-ipcMain.handle('print:pdf', async (_e, opts: { widthMm: number; heightMm: number; defaultPath: string }) => {
+ipcMain.handle('print:pdf', async (_e, opts: { widthMm: number; heightMm: number; defaultPath: string; path?: string }) => {
   if (!mainWindow) return null;
-  const target = await dialog.showSaveDialog(mainWindow, {
-    title: 'PDF로 저장',
-    defaultPath: opts.defaultPath,
-    filters: [{ name: 'PDF 문서', extensions: ['pdf'] }],
-  });
-  if (target.canceled || !target.filePath) return null;
+  // 다른 이름으로 저장에서 이미 고른 경로가 있으면 대화상자를 다시 띄우지 않는다
+  let filePath: string;
+  if (opts.path) filePath = assertAllowed(opts.path, 'PDF 저장');
+  else {
+    const target = await dialog.showSaveDialog(mainWindow, {
+      title: 'PDF로 저장',
+      defaultPath: typeof opts.defaultPath === 'string' ? opts.defaultPath : undefined,
+      filters: [{ name: 'PDF 문서', extensions: ['pdf'] }],
+    });
+    if (target.canceled || !target.filePath) return null;
+    filePath = target.filePath;
+    allowPath(filePath);
+  }
+  const target = { filePath };
   const data = await mainWindow.webContents.printToPDF({
     printBackground: true,
     preferCSSPageSize: true,
@@ -331,8 +471,41 @@ ipcMain.handle('app:close-confirmed', () => {
   mainWindow?.close();
 });
 ipcMain.handle('app:toggle-fullscreen', () => mainWindow?.setFullScreen(!mainWindow.isFullScreen()));
-ipcMain.handle('app:devtools', () => mainWindow?.webContents.toggleDevTools());
 ipcMain.handle('app:version', () => app.getVersion());
+
+// ---------------- PowerShell ----------------
+const POWERSHELL = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+/** 스크립트를 -EncodedCommand 로 넘긴다 (따옴표/공백 해석 문제가 없다) */
+function runPowerShell(script: string, opts: { timeout?: number; maxBuffer?: number } = {}): Promise<{ ok: boolean; stdout: string }> {
+  const encoded = Buffer.from(script, 'utf16le').toString('base64');
+  return new Promise((resolve) => {
+    execFile(
+      POWERSHELL,
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
+      { timeout: opts.timeout ?? 60000, maxBuffer: opts.maxBuffer ?? 4 * 1024 * 1024, windowsHide: true },
+      (err, stdout) => resolve({ ok: !err, stdout: String(stdout || '') }),
+    );
+  });
+}
+
+/** 오래된 변환용 임시 폴더(kite-*) 정리: 변환이 중단되면 남을 수 있다 */
+function sweepStaleTemp() {
+  try {
+    const tmp = os.tmpdir();
+    const limit = Date.now() - 24 * 60 * 60 * 1000;
+    for (const name of fs.readdirSync(tmp)) {
+      if (!/^kite-[A-Za-z0-9]{6}$/.test(name)) continue;
+      const p = path.join(tmp, name);
+      try {
+        if (fs.statSync(p).mtimeMs < limit) fs.rmSync(p, { recursive: true, force: true });
+      } catch {
+        /* 사용 중이면 다음에 */
+      }
+    }
+  } catch {
+    /* 무시 */
+  }
+}
 
 // ---------------- 시스템 글꼴 목록 ----------------
 let fontCache: string[] | null = null;
@@ -341,22 +514,19 @@ ipcMain.handle('fonts:list', async () => {
   if (process.platform !== 'win32') return [];
   const script =
     "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Add-Type -AssemblyName System.Drawing; (New-Object System.Drawing.Text.InstalledFontCollection).Families | ForEach-Object { $_.Name }";
-  fontCache = await new Promise<string[]>((resolve) => {
-    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { maxBuffer: 4 * 1024 * 1024, windowsHide: true }, (err, stdout) => {
-      if (err) return resolve([]);
-      resolve(
-        stdout
-          .split(/\r?\n/)
-          .map((s) => s.trim())
-          .filter(Boolean),
-      );
-    });
-  });
+  const r = await runPowerShell(script);
+  fontCache = r.ok
+    ? r.stdout
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [];
   return fontCache;
 });
 
 // ---------------- 구형 DOC 변환 ----------------
 ipcMain.handle('doc:convert', async (_e, data: Uint8Array) => {
+  if (!(data instanceof Uint8Array) || data.byteLength > MAX_WRITE) throw new Error('DOC 내용이 올바르지 않습니다.');
   const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'kite-'));
   const src = path.join(tmpDir, 'input.doc');
   const dst = path.join(tmpDir, 'output.docx');
@@ -366,10 +536,21 @@ ipcMain.handle('doc:convert', async (_e, data: Uint8Array) => {
     if (process.platform === 'win32') {
       // 사용자가 이미 Word를 쓰고 있으면 그 인스턴스에 붙을 수 있으므로,
       // 우리가 새로 띄운 경우에만 숨기고 종료한다.
-      const ps = `$ErrorActionPreference='Stop'; $running = @(Get-Process WINWORD -ErrorAction SilentlyContinue).Count -gt 0; $w = New-Object -ComObject Word.Application; if (-not $running) { $w.Visible = $false }; $w.DisplayAlerts = 0; try { $d = $w.Documents.Open('${src.replace(/'/g, "''")}', $false, $true, $false); $d.SaveAs2('${dst.replace(/'/g, "''")}', 16); $d.Close($false) } finally { if (-not $running -and $w.Documents.Count -eq 0) { $w.Quit() } }`;
-      const ok = await new Promise<boolean>((resolve) => {
-        execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { timeout: 60000, windowsHide: true }, (err) => resolve(!err));
-      });
+      // 신뢰할 수 없는 문서이므로 매크로를 강제로 끄고(AutomationSecurity=3) 연결 갱신도 막는다.
+      // 임시 파일에 다시 쓰면 다운로드 표식(MOTW)이 사라져 Office 의 매크로 차단이 적용되지 않기 때문이다.
+      const q = (p: string) => `'${p.replace(/'/g, "''")}'`;
+      const ps = [
+        "$ErrorActionPreference='Stop'",
+        '$running = @(Get-Process WINWORD -ErrorAction SilentlyContinue).Count -gt 0',
+        '$w = New-Object -ComObject Word.Application',
+        'if (-not $running) { $w.Visible = $false }',
+        '$w.DisplayAlerts = 0',
+        '$prevSec = $w.AutomationSecurity',
+        '$w.AutomationSecurity = 3',
+        'try { $w.Options.UpdateLinksAtOpen = $false } catch {}',
+        `try { $d = $w.Documents.Open(${q(src)}, $false, $true, $false); $d.SaveAs2(${q(dst)}, 16); $d.Close($false) } finally { $w.AutomationSecurity = $prevSec; if (-not $running -and $w.Documents.Count -eq 0) { $w.Quit() } }`,
+      ].join('; ');
+      const { ok } = await runPowerShell(ps, { timeout: 60000 });
       if (ok && fs.existsSync(dst)) {
         const buf = await fs.promises.readFile(dst);
         return { kind: 'docx', data: new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength) };
@@ -411,21 +592,63 @@ import { abortChat, keyStatus, listModels, setKey, startChat, type ChatRequest, 
 
 ipcMain.handle('ai:key-status', () => keyStatus());
 ipcMain.handle('ai:set-key', (_e, p: Provider, key: string | null) => {
+  if (!PROVIDERS.has(p) || (key != null && (typeof key !== 'string' || key.length > 512))) throw new Error('키 형식이 올바르지 않습니다.');
   setKey(p, key);
   return keyStatus();
 });
 ipcMain.handle('ai:models', async (_e, p: Provider) => {
+  if (!PROVIDERS.has(p)) return { ok: false, error: '알 수 없는 AI 제공자입니다.' };
   try {
     return { ok: true, models: await listModels(p) };
   } catch (e: any) {
     return { ok: false, error: String(e?.message || e) };
   }
 });
-ipcMain.handle('ai:chat', (e, req: ChatRequest) => {
+const PROVIDERS = new Set(['claude', 'openai', 'gemini']);
+const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+const MAX_CHAT_CHARS = 2 * 1024 * 1024;
+/** 렌더러에서 온 요청을 검사해 정리한 사본을 돌려준다 */
+function validateChat(req: any): ChatRequest {
+  if (!req || typeof req !== 'object') throw new Error('요청이 올바르지 않습니다.');
+  if (!PROVIDERS.has(req.provider)) throw new Error('알 수 없는 AI 제공자입니다.');
+  if (typeof req.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(req.id)) throw new Error('요청 id 가 올바르지 않습니다.');
+  if (typeof req.model !== 'string' || !/^[A-Za-z0-9._:\/-]{1,128}$/.test(req.model)) throw new Error('모델 이름이 올바르지 않습니다.');
+  if (!Array.isArray(req.messages) || req.messages.length === 0 || req.messages.length > 400) throw new Error('대화 내용이 올바르지 않습니다.');
+  let total = typeof req.system === 'string' ? req.system.length : 0;
+  const messages = req.messages.map((m: any) => {
+    if (!m || (m.role !== 'user' && m.role !== 'assistant') || typeof m.content !== 'string') throw new Error('대화 내용이 올바르지 않습니다.');
+    total += m.content.length;
+    return { role: m.role, content: m.content };
+  });
+  if (total > MAX_CHAT_CHARS) throw new Error('보낼 내용이 너무 깁니다.');
+  const out: ChatRequest = { id: req.id, provider: req.provider, model: req.model, system: typeof req.system === 'string' ? req.system : '', messages };
+  if (req.effort != null) {
+    if (!EFFORTS.has(req.effort)) throw new Error('effort 값이 올바르지 않습니다.');
+    out.effort = req.effort;
+  }
+  return out;
+}
+let activeChats = 0;
+ipcMain.handle('ai:chat', async (e, raw: unknown) => {
   const wc = e.sender;
+  let req: ChatRequest;
+  try {
+    req = validateChat(raw);
+  } catch (err: any) {
+    const id = typeof (raw as any)?.id === 'string' ? (raw as any).id : '';
+    if (!wc.isDestroyed()) wc.send('ai:event', { id, type: 'error', message: String(err?.message || err) });
+    return false;
+  }
+  if (activeChats >= 3) {
+    if (!wc.isDestroyed()) wc.send('ai:event', { id: req.id, type: 'error', message: '진행 중인 요청이 너무 많습니다. 잠시 후 다시 시도하세요.' });
+    return false;
+  }
+  activeChats++;
   startChat(req, (ev) => {
     if (!wc.isDestroyed()) wc.send('ai:event', ev);
-  });
+  }).finally(() => activeChats--);
   return true;
 });
-ipcMain.handle('ai:abort', (_e, id: string) => abortChat(id));
+ipcMain.handle('ai:abort', (_e, id: string) => {
+  if (typeof id === 'string') abortChat(id);
+});
