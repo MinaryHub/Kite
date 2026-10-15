@@ -1,0 +1,20 @@
+import fs from 'node:fs';
+import { load } from './harness.mjs';
+const { extractPage } = await load('src/formats/pdf/extract.ts');
+const pdfjs = await import('../node_modules/pdfjs-dist/legacy/build/pdf.mjs');
+const data = new Uint8Array(fs.readFileSync(process.argv[2]));
+const pdf = await pdfjs.getDocument({ data, isEvalSupported: false, disableFontFace: true, fontExtraProperties: true }).promise;
+const page = await pdf.getPage(+(process.argv[3] || 1));
+const ops = await page.getOperatorList();
+const vp = page.getViewport({ scale: 1 });
+const c = extractPage(ops, pdfjs.OPS, (id) => { const o = page.commonObjs.get(id); return o ? { name: o.name || '', bold: !!o.bold, italic: !!o.italic, fontMatrix: o.fontMatrix, vertical: !!o.vertical } : null; }, vp);
+console.log('glyphs', c.glyphs.length, 'fills', c.fills.length, 'tiles', c.fills.filter(f=>f.tile).length, 'segs', c.segs.length, 'imgs', c.images.length);
+const s = c.glyphs.slice(0, 40).map(g => g.ch).join('');
+console.log(s);
+console.log(c.glyphs.slice(0,3));
+const cols = {}; for (const f of c.fills) cols[f.color] = (cols[f.color]||0)+1; console.log(cols);
+console.log(c.fills.filter(f=>!f.tile).slice(0,10).map(f=>[f.x0,f.y0,f.x1,f.y1].map(Math.round).join(',')+' '+f.color));
+console.log(c.segs.slice(0,6));
+const tiles = c.fills.filter(f=>f.tile);
+const bx = (a)=>[Math.min(...a.map(t=>t.x0)),Math.min(...a.map(t=>t.y0)),Math.max(...a.map(t=>t.x1)),Math.max(...a.map(t=>t.y1))].map(Math.round);
+if (tiles.length) { console.log('tiles bbox', bx(tiles)); const ys = {}; for (const t of tiles) { const k=Math.round(t.y0/20)*20; ys[k]=(ys[k]||0)+1;} console.log(ys); console.log(tiles.slice(0,3)); }
