@@ -148,6 +148,8 @@ export class AppController {
     });
     platform.onOpenFiles((files) => files.forEach((f) => this.openPath(f)));
     platform.onRequestClose(() => this.requestQuit());
+    // AI 앱 연결(MCP) 도구 처리기 (준비됨 신호는 첫 문서가 열린 뒤에 보낸다)
+    (await import('./mcpHandlers')).installMcpHandlers();
     platform.onAutosaveNow(async () => {
       try {
         await this.autosaveNow();
@@ -159,6 +161,7 @@ export class AppController {
     for (const f of initial) await this.openPath(f);
     await this.checkRecovery();
     if (!this.docs.length) this.newDoc();
+    platform.mcp.ready();
     this.restartAutosave();
     this.emit();
   }

@@ -359,6 +359,7 @@ export const commands: Record<string, Command> = {
   'tools.ai': { label: 'AI 도우미 (Claude·GPT·Gemini)', icon: 'Sparkles', shortcut: 'Ctrl+Shift+A', keys: ['Ctrl+Shift+A'], run: () => app.set({ aiOpen: !app.aiOpen }), active: () => app.aiOpen },
   'tools.prefs': { label: '환경 설정...', icon: 'Settings', run: () => app.openDialog('prefs') },
   'tools.shortcuts': { label: '단축키 목록', icon: 'Keyboard', shortcut: 'Shift+F1', keys: ['Shift+F1'], run: () => app.openDialog('shortcuts') },
+  'tools.mcp': { label: 'AI 앱 연결 (MCP)...', icon: 'Plug', run: () => app.openDialog('mcp') },
   'tools.about': { label: 'Kite 정보', icon: 'Info', run: () => app.openDialog('about') },
   'tools.overwrite': { label: '삽입/수정 모드 전환', shortcut: 'Insert', run: () => chain().toggleOverwrite().run(), enabled: hasDoc },
 };

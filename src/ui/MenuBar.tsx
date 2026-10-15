@@ -133,7 +133,7 @@ const MENUS: { label: string; key: string; items: () => MenuEntry[] }[] = [
   {
     label: '도구(K)',
     key: 'k',
-    items: () => ['tools.ai', '-', 'tools.spell', 'tools.wordCount', '-', 'tools.overwrite', '-', 'tools.prefs', 'tools.shortcuts', '-', 'tools.about'],
+    items: () => ['tools.ai', 'tools.mcp', '-', 'tools.spell', 'tools.wordCount', '-', 'tools.overwrite', '-', 'tools.prefs', 'tools.shortcuts', '-', 'tools.about'],
   },
 ];
 

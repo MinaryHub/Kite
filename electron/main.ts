@@ -3,6 +3,10 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
+import { initMcpHost, isMcpBridge, runMcpBridge } from './mcp';
+
+/** AI 앱이 실행한 MCP 다리(Kite.exe --mcp): 창 없이 표준 입출력으로만 동작한다 */
+const MCP_BRIDGE = isMcpBridge();
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 let mainWindow: BrowserWindow | null = null;
@@ -100,7 +104,7 @@ function migrateOldUserData() {
     /* 무시 */
   }
 }
-if (!process.env.KITE_SMOKE) migrateOldUserData();
+if (!process.env.KITE_SMOKE && !process.env.KITE_USER_DATA && !MCP_BRIDGE) migrateOldUserData();
 app.setAppUserModelId('kr.smic.kite');
 
 /** 창 아이콘 (배포본: dist/icon.png, 개발: public/icon.png) */
@@ -111,9 +115,14 @@ function appIcon(): string | undefined {
 
 // 자가 점검 실행은 별도 데이터 폴더를 써서 사용 중인 Kite 창과 섞이지 않게 한다
 if (process.env.KITE_SMOKE) app.setPath('userData', path.join(os.tmpdir(), 'kite-smoke-' + process.pid));
+// 개발/시험 실행(배포본 아님)에서만: 데이터 폴더 지정 (MCP 종단 간 시험 등)
+if (!app.isPackaged && process.env.KITE_USER_DATA) app.setPath('userData', process.env.KITE_USER_DATA);
 
-const gotLock = app.requestSingleInstanceLock();
-if (!gotLock) {
+// MCP 다리는 실행 중인 Kite 와 따로 돌아야 하므로 단일 실행 잠금을 쓰지 않는다
+const gotLock = MCP_BRIDGE ? true : app.requestSingleInstanceLock();
+if (MCP_BRIDGE) {
+  // 다리 모드: 아래 창 만들기 등은 건너뛴다
+} else if (!gotLock) {
   app.quit();
 } else {
   app.on('second-instance', (_e, argv) => {
@@ -126,7 +135,7 @@ if (!gotLock) {
   });
 }
 
-pendingFiles.push(...filesFromArgv(process.argv));
+if (!MCP_BRIDGE) pendingFiles.push(...filesFromArgv(process.argv));
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -240,18 +249,27 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  if (MCP_BRIDGE) {
+    runMcpBridge().catch((e) => {
+      console.error('[mcp]', e);
+      app.exit(1);
+    });
+    return;
+  }
   // 웹 권한(카메라·마이크·위치·알림 등)은 쓰지 않으므로 모두 거부한다
   const ALLOWED_PERMISSIONS = new Set(['clipboard-sanitized-write', 'fullscreen']);
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(ALLOWED_PERMISSIONS.has(permission)));
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => ALLOWED_PERMISSIONS.has(permission));
   sweepStaleTemp();
   createWindow();
+  initMcpHost(() => mainWindow);
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
 app.on('window-all-closed', () => {
+  if (MCP_BRIDGE) return;
   if (process.platform !== 'darwin') app.quit();
 });
 

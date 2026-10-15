@@ -218,6 +218,16 @@ export const platform = {
   async version(): Promise<string> {
     return api ? api.appVersion() : '';
   },
+  // ---- AI 앱 연결 (MCP): 데스크톱 앱에서만 ----
+  mcp: {
+    available: () => !!api,
+    status: () => (api ? api.mcpStatus() : Promise.resolve(null)),
+    set: (patch: { enabled?: boolean; confirmEdits?: boolean; allowed?: string[] }) => (api ? api.mcpSet(patch) : Promise.resolve(null)),
+    registerClaude: () => (api ? api.mcpRegisterClaude() : Promise.resolve({ ok: false, message: '데스크톱 앱에서만 쓸 수 있습니다.' })),
+    onCall: (cb: (call: any) => void) => (api ? api.onMcpCall(cb) : () => {}),
+    result: (r: { callId: string; ok: boolean; text: string }) => api?.mcpResult(r),
+    ready: () => api?.mcpReady(),
+  },
   closeConfirmed() {
     if (api) api.closeConfirmed();
   },

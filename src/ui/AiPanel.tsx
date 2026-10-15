@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
+import { renderMarkdown } from './aiMarkdown';
 import { useApp } from '../app/hooks';
 import { app } from '../app/controller';
 import { Icon } from './Icon';
@@ -66,25 +65,7 @@ const lsSet = (k: string, v: string) => {
   }
 };
 
-// 응답 속 외부 그림은 표시만으로 주소(=문서 내용)가 전송될 수 있으므로 제거한다.
-// (문서에 숨겨진 지시로 조작된 응답이 데이터를 빼내는 경로 차단)
-DOMPurify.addHook('afterSanitizeAttributes', (node) => {
-  const el = node as Element;
-  if (el.tagName === 'IMG') {
-    const src = el.getAttribute('src') || '';
-    if (!/^data:image\//i.test(src)) el.remove();
-  }
-});
-
-export function renderMarkdown(md: string): string {
-  const html = marked.parse(md, { gfm: true, breaks: true, async: false }) as string;
-  return DOMPurify.sanitize(html, {
-    USE_PROFILES: { html: true },
-    FORBID_TAGS: ['style', 'form', 'iframe', 'object', 'embed', 'video', 'audio', 'source', 'link', 'meta', 'svg', 'math'],
-    // 인라인 CSS·대체 그림 주소 등으로 바깥에 요청이 나가지 않도록
-    FORBID_ATTR: ['style', 'srcset', 'poster', 'ping', 'formaction', 'background', 'target'],
-  });
-}
+export { renderMarkdown };
 
 /** 현재 문서 또는 선택 영역의 내용 (Markdown) */
 function getContext(mode: 'doc' | 'selection' | 'none'): { text: string; label: string } | null {

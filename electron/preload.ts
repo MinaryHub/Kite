@@ -39,6 +39,19 @@ const api = {
     return p || null;
   },
   appVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
+  // ---- AI 앱 연결 (MCP) ----
+  mcpStatus: (): Promise<any> => ipcRenderer.invoke('mcp:status'),
+  mcpSet: (patch: { enabled?: boolean; confirmEdits?: boolean; allowed?: string[] }): Promise<any> => ipcRenderer.invoke('mcp:set', patch),
+  mcpRegisterClaude: (): Promise<{ ok: boolean; message: string }> => ipcRenderer.invoke('mcp:register-claude'),
+  onMcpCall: (cb: (call: any) => void) => {
+    const h = (_e: unknown, call: any) => cb(call);
+    ipcRenderer.on('mcp:call', h);
+    return () => {
+      ipcRenderer.removeListener('mcp:call', h);
+    };
+  },
+  mcpResult: (r: { callId: string; ok: boolean; text: string }) => ipcRenderer.send('mcp:result', r),
+  mcpReady: () => ipcRenderer.send('mcp:ready'),
   printToPdf: (opts: { widthMm: number; heightMm: number; defaultPath: string; path?: string }): Promise<string | null> => ipcRenderer.invoke('print:pdf', opts),
   print: (opts: { widthMm: number; heightMm: number; landscape: boolean }): Promise<boolean> => ipcRenderer.invoke('print:print', opts),
   paste: () => ipcRenderer.invoke('edit:paste'),

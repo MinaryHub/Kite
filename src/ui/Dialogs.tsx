@@ -17,12 +17,13 @@ import {
   ConfirmDialog,
   ImageCropDialog,
 } from './dialogs/MiscDialogs';
+import { McpDialog } from './dialogs/McpDialog';
 
 export function Dialogs() {
   const app = useApp();
   const d = app.dialog;
   const close = () => app.closeDialog();
-  const needsDoc = d && !['prefs', 'shortcuts', 'about'].includes(d.type);
+  const needsDoc = d && !['prefs', 'shortcuts', 'about', 'mcp'].includes(d.type);
   let el: JSX.Element | null = null;
   if (d && (!needsDoc || app.active)) {
     switch (d.type) {
@@ -76,6 +77,9 @@ export function Dialogs() {
         break;
       case 'about':
         el = <AboutDialog onClose={close} />;
+        break;
+      case 'mcp':
+        el = <McpDialog onClose={close} />;
         break;
     }
   }
