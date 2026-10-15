@@ -256,6 +256,8 @@ app.whenReady().then(() => {
     });
     return;
   }
+  // 이미 실행 중인 Kite 가 있으면(잠금 실패) 아무것도 시작하지 않는다 (파일은 기존 창으로 넘어갔다)
+  if (!gotLock) return;
   // 웹 권한(카메라·마이크·위치·알림 등)은 쓰지 않으므로 모두 거부한다
   const ALLOWED_PERMISSIONS = new Set(['clipboard-sanitized-write', 'fullscreen']);
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(ALLOWED_PERMISSIONS.has(permission)));

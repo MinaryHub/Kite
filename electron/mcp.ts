@@ -32,11 +32,22 @@ const pipeFile = () => path.join(userDataDir(), 'mcp-pipe');
 function pipePathFor(id: string) {
   return process.platform === 'win32' ? `\\\\.\\pipe\\kite-mcp-${id}` : path.join(userDataDir(), `kite-mcp-${id}.sock`);
 }
-function newPipeName(): string {
-  const id = crypto.randomBytes(16).toString('hex');
+function newPipeId(): string {
+  return crypto.randomBytes(16).toString('hex');
+}
+/** 실제로 파이프를 연 뒤에만 이름을 기록한다 (열지 못한 이름이 남아 다른 프로세스가 차지할 틈을 주지 않게) */
+function publishPipeId(id: string) {
   fs.mkdirSync(userDataDir(), { recursive: true });
-  fs.writeFileSync(pipeFile(), id, { mode: 0o600 });
-  return pipePathFor(id);
+  const tmp = pipeFile() + '.tmp';
+  fs.writeFileSync(tmp, id, { mode: 0o600 });
+  fs.renameSync(tmp, pipeFile());
+}
+function unpublishPipeId() {
+  try {
+    fs.unlinkSync(pipeFile());
+  } catch {
+    /* 없음 */
+  }
 }
 function readPipeName(): string | null {
   try {
@@ -224,6 +235,12 @@ function handleConnection(sock: net.Socket) {
   let snonce = '';
   let cnonce = '';
   const bad = () => sock.destroy();
+  /** 거절 메시지를 다 보낸 뒤 닫는다 (바로 끊으면 응답이 사라질 수 있다) */
+  const reject = (error: string) => {
+    if (sock.destroyed) return;
+    sock.end(JSON.stringify({ type: 'hello', ok: false, error }) + '\n');
+    setTimeout(bad, 1000);
+  };
   sock.setTimeout(10 * 60 * 1000, bad);
   sock.on('close', () => liveConns.delete(sock));
   onLines(
@@ -232,8 +249,7 @@ function handleConnection(sock: net.Socket) {
       if (state === 'hello') {
         // 1) { type: 'hello', client, cnonce } → 서버가 토큰을 안다는 증명과 함께 도전값을 보낸다
         if (msg?.type !== 'hello' || !token || typeof msg.cnonce !== 'string' || !/^[0-9a-f]{64}$/.test(msg.cnonce)) {
-          send(sock, { type: 'hello', ok: false, error: '인증에 실패했습니다.' });
-          return bad();
+          return reject('인증에 실패했습니다.');
         }
         cnonce = msg.cnonce;
         snonce = crypto.randomBytes(32).toString('hex');
@@ -245,16 +261,14 @@ function handleConnection(sock: net.Socket) {
       if (state === 'auth') {
         // 2) { type: 'auth', proof } → 클라이언트도 토큰을 아는지 확인한 뒤 사용자 허용
         if (msg?.type !== 'auth' || !token || !sameHex(msg.proof, proof(token, 'client', snonce, cnonce))) {
-          send(sock, { type: 'hello', ok: false, error: '인증에 실패했습니다.' });
-          return bad();
+          return reject('인증에 실패했습니다.');
         }
         if (!cfg.enabled) {
-          send(sock, { type: 'hello', ok: false, error: 'Kite 에서 AI 앱 연결이 꺼져 있습니다.' });
-          return bad();
+          return reject('Kite 에서 AI 앱 연결이 꺼져 있습니다.');
         }
         const ok = await approve(client);
-        send(sock, { type: 'hello', ok, error: ok ? undefined : '사용자가 연결을 거부했습니다.' });
-        if (!ok) return bad();
+        if (!ok) return reject('사용자가 연결을 거부했습니다.');
+        send(sock, { type: 'hello', ok: true });
         state = 'ready';
         liveConns.set(sock, client);
         return;
@@ -291,7 +305,9 @@ function dropConnections(keep: (client: string) => boolean) {
 function startServer() {
   if (server) return;
   ensureToken();
-  const name = newPipeName();
+  unpublishPipeId();
+  const id = newPipeId();
+  const name = pipePathFor(id);
   if (process.platform !== 'win32') {
     try {
       fs.unlinkSync(name);
@@ -299,22 +315,23 @@ function startServer() {
       /* 없음 */
     }
   }
-  server = net.createServer(handleConnection);
-  server.on('error', (e) => {
+  const srv = net.createServer(handleConnection);
+  server = srv;
+  srv.on('error', (e) => {
+    // 같은 이름이 이미 있으면(무작위라 정상적으로는 없다) 열지 않는다: libuv 는 첫 인스턴스 전용 플래그로 파이프를 만든다
     console.error('[mcp] pipe error', e);
-    server = null;
+    if (server === srv) server = null;
+    unpublishPipeId();
   });
-  server.listen(name);
+  srv.listen(name, () => {
+    if (server === srv) publishPipeId(id);
+  });
 }
 function stopServer() {
   server?.close();
   server = null;
   dropConnections(() => false);
-  try {
-    fs.unlinkSync(pipeFile());
-  } catch {
-    /* 없음 */
-  }
+  unpublishPipeId();
 }
 
 /** 실행 중인 Kite 에서 호출: 설정에 따라 파이프 서버를 켜고 IPC 를 등록한다 */
@@ -322,6 +339,10 @@ export function initMcpHost(win: () => BrowserWindow | null) {
   getWindow = win;
   cfg = readMcpConfig();
   if (cfg.enabled) startServer();
+  // 끝낼 때 파이프 이름 기록을 지운다
+  app.on('will-quit', () => {
+    if (server) unpublishPipeId();
+  });
 
   ipcMain.on('mcp:ready', () => {
     rendererReady = true;

@@ -75,6 +75,8 @@ try {
 } finally {
   await client.close().catch(() => {});
   kite.kill();
+  await new Promise((r) => (kite.exitCode !== null ? r() : kite.once('exit', r)));
+  await new Promise((r) => setTimeout(r, 1500));
 }
 
 // 3) 토큰을 모르는 클라이언트는 거부되는지 (파이프에 직접 연결, 틀린 증명)
@@ -82,9 +84,20 @@ const net = await import('node:net');
 const pipePath = (id) => String.raw`\\.\pipe\kite-mcp-` + id;
 const crypto = await import('node:crypto');
 {
+  const pipeFile = path.join(userData, 'mcp-pipe');
+  const stale = fs.existsSync(pipeFile) ? fs.readFileSync(pipeFile, 'utf8').trim() : '';
   const kite2 = spawn(electron, [root], { env, stdio: 'ignore' });
-  await new Promise((r) => setTimeout(r, 7000));
-  const id = fs.readFileSync(path.join(userData, 'mcp-pipe'), 'utf8').trim();
+  // 새 Kite 가 파이프를 연 뒤 새 이름을 기록할 때까지 기다린다
+  let id = '';
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 500));
+    const cur = fs.existsSync(pipeFile) ? fs.readFileSync(pipeFile, 'utf8').trim() : '';
+    if (cur && cur !== stale) {
+      id = cur;
+      break;
+    }
+  }
+  check('pipe name republished after restart', !!id && id !== stale);
   const reply = await new Promise((resolve) => {
     const s = net.connect(pipePath(id));
     let buf = '';
@@ -96,7 +109,7 @@ const crypto = await import('node:crypto');
       }
     });
     s.on('connect', () => s.write(JSON.stringify({ type: 'hello', client: 'kite-test', cnonce: crypto.randomBytes(32).toString('hex') }) + '\n'));
-    s.on('close', () => resolve(buf));
+    s.on('close', () => resolve(buf || 'CLOSED-EMPTY'));
     s.on('error', (e) => resolve('ERR ' + e.message));
     setTimeout(() => resolve(buf || 'TIMEOUT'), 5000);
   });
