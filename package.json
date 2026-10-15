@@ -42,9 +42,11 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "electronDist": "node_modules/electron/dist"
   },
-  "dependencies": {
+  "dependencies": {},
+  "devDependencies": {
     "@tiptap/core": "^2.27.3",
     "@tiptap/extension-character-count": "^2.27.3",
     "@tiptap/extension-color": "^2.27.3",
@@ -67,7 +69,17 @@
     "@tiptap/pm": "^2.27.3",
     "@tiptap/react": "^2.27.3",
     "@tiptap/starter-kit": "^2.27.3",
+    "@types/node": "^26.6.5",
+    "@types/pako": "^2.0.4",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@types/turndown": "^5.0.6",
+    "@vitejs/plugin-react": "^6.1.2",
     "cfb": "^1.2.2",
+    "electron": "^44.7.2",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "jsdom": "^29.1.1",
     "jszip": "^3.10.2",
     "lucide-react": "^1.57.0",
     "marked": "^18.1.1",
@@ -77,20 +89,8 @@
     "react-dom": "^18.3.1",
     "turndown": "^7.2.4",
     "turndown-plugin-gfm": "^1.0.2",
-    "word-extractor": "^1.0.4"
-  },
-  "devDependencies": {
-    "@types/node": "^26.6.5",
-    "@types/pako": "^2.0.4",
-    "@types/react": "^18.3.31",
-    "@types/react-dom": "^18.3.7",
-    "@types/turndown": "^5.0.6",
-    "@vitejs/plugin-react": "^6.1.2",
-    "electron": "^44.7.2",
-    "electron-builder": "^26.15.3",
-    "esbuild": "^0.28.2",
-    "jsdom": "^29.1.1",
     "typescript": "^7.0.2",
-    "vite": "^8.3.4"
+    "vite": "^8.3.4",
+    "word-extractor": "^1.0.4"
   }
 }
