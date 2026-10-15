@@ -52,7 +52,9 @@ const SERIF_RE = /바탕|명조|궁서|신명|Batang|Myeongjo|Gungsuh|serif|Time
 
 /** 설치되지 않은 글꼴을 위한 대체 글꼴 목록 (한글처럼 명조/고딕 계열 유지) */
 export function fontStack(name: string): string {
-  const q = `'${name.replace(/'/g, "\'")}'`;
+  // 문서에서 온 글꼴 이름이므로 CSS 구문을 바꿀 수 있는 문자는 모두 제거
+  const safe = name.replace(/[\u0000-\u001f\u007f'"\\;:{}()<>@[\]]/g, '').trim().slice(0, 80) || '함초롬바탕';
+  const q = `'${safe}'`;
   if (/D2Coding|Consolas|Courier|Mono|코딩/i.test(name)) return `${q}, D2Coding, Consolas, monospace`;
   return SERIF_RE.test(name)
     ? `${q}, '함초롬바탕', 'HCR Batang', '휴먼명조', '바탕', Batang, serif`

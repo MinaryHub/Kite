@@ -66,6 +66,7 @@ const MENUS: { label: string; key: string; items: () => MenuEntry[] }[] = [
     items: () => [
       'insert.table',
       'insert.image',
+      'image.crop',
       '-',
       'insert.link',
       'insert.footnote',
@@ -118,6 +119,7 @@ const MENUS: { label: string; key: string; items: () => MenuEntry[] }[] = [
       'table.deleteRow',
       'table.deleteCol',
       '-',
+      'table.select',
       'table.selectCell',
       'table.merge',
       'table.split',

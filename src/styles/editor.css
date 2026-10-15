@@ -131,6 +131,39 @@
 .kdoc-content .tableWrapper {
   overflow: visible;
   margin: 0;
+  position: relative;
+}
+.kdoc-content .table-handle {
+  position: absolute;
+  left: -17px;
+  top: -2px;
+  width: 15px;
+  height: 15px;
+  line-height: 13px;
+  font-size: 12px;
+  text-align: center;
+  color: #2f6fd6;
+  background: #fff;
+  border: 1px solid #9db3dc;
+  border-radius: 2px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s;
+  user-select: none;
+  z-index: 6;
+  font-family: sans-serif;
+}
+.kdoc-content .tableWrapper:hover > .table-handle,
+.kdoc-content .tableWrapper.ProseMirror-selectednode > .table-handle {
+  opacity: 1;
+}
+.kdoc-content .tableWrapper.ProseMirror-selectednode > table {
+  outline: 2px solid #2f6fd6;
+  outline-offset: 1px;
+  background: rgba(47, 111, 214, 0.06);
+}
+.print-page .table-handle {
+  display: none !important;
 }
 .kdoc-content table {
   border-collapse: collapse;
@@ -204,6 +237,18 @@
 .kdoc-content .k-image img {
   max-width: 100%;
   height: auto;
+}
+.kdoc-content .k-image.cropped,
+.print-page .k-image.cropped {
+  overflow: hidden;
+}
+.kdoc-content .k-image.cropped img {
+  max-width: none;
+  display: block;
+}
+.kdoc-content .k-image.cropped.selected {
+  outline: 2px solid #2f6fd6;
+  outline-offset: 1px;
 }
 .kdoc-content .k-image img[style*='height'] {
   object-fit: fill;
@@ -387,4 +432,42 @@
 }
 .print-page .kdoc-content img {
   outline: none !important;
+}
+
+.kdoc-content .k-image.cropped .k-image-handle {
+  right: 0;
+  bottom: 0;
+}
+
+/* 그림 자르기 대화 상자 */
+.crop-stage {
+  position: relative;
+  display: inline-block;
+  background: repeating-conic-gradient(#eee 0% 25%, #fff 0% 50%) 0 0 / 16px 16px;
+  user-select: none;
+  line-height: 0;
+}
+.crop-stage img {
+  display: block;
+  pointer-events: none;
+}
+.crop-stage .crop-shade {
+  position: absolute;
+  background: rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+.crop-stage .crop-box {
+  position: absolute;
+  border: 1.5px dashed #fff;
+  outline: 1px solid #2f6fd6;
+  cursor: move;
+}
+.crop-stage .crop-h {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  background: #fff;
+  border: 2px solid #2f6fd6;
+  border-radius: 2px;
 }

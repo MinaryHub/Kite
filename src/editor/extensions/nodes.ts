@@ -6,7 +6,8 @@ import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
 import Table, { TableView } from '@tiptap/extension-table';
 import type { Node as PMNode } from '@tiptap/pm/model';
-import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
+import { NodeSelection, Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
+import type { EditorView } from '@tiptap/pm/view';
 import { viewState } from '../viewState';
 
 declare module '@tiptap/core' {
@@ -17,7 +18,20 @@ declare module '@tiptap/core' {
   }
 }
 
-// ---------------- 그림 (크기 조절 가능) ----------------
+// ---------------- 그림 (크기 조절·자르기) ----------------
+export interface Crop {
+  t: number;
+  r: number;
+  b: number;
+  l: number;
+}
+
+export const cropOf = (v: any): Crop | null => {
+  if (!v) return null;
+  const c = { t: +v.t || 0, r: +v.r || 0, b: +v.b || 0, l: +v.l || 0 };
+  return c.t || c.r || c.b || c.l ? c : null;
+};
+
 export const KImage = Image.extend({
   addAttributes() {
     return {
@@ -40,6 +54,20 @@ export const KImage = Image.extend({
         },
         renderHTML: (a: Record<string, any>) => (a.height ? { height: a.height } : {}),
       },
+      /** 잘라 낸 비율 (0~1): 위/오른쪽/아래/왼쪽 */
+      crop: {
+        default: null,
+        parseHTML: (el: HTMLElement) => {
+          const v = el.getAttribute('data-crop');
+          if (!v) return null;
+          const [t, r, b, l] = v.split(',').map(Number);
+          return cropOf({ t, r, b, l });
+        },
+        renderHTML: (a: Record<string, any>) => {
+          const c = cropOf(a.crop);
+          return c ? { 'data-crop': [c.t, c.r, c.b, c.l].join(',') } : {};
+        },
+      },
     };
   },
 
@@ -53,13 +81,34 @@ export const KImage = Image.extend({
       img.draggable = false;
       const handle = document.createElement('span');
       handle.className = 'k-image-handle';
+      handle.title = '끌기: 크기 조절 / Shift+끌기: 자르기';
       wrap.append(img, handle);
 
+      const layout = (w: number | null, h: number | null, crop: Crop | null) => {
+        if (crop && w && h) {
+          const iw = w / Math.max(0.01, 1 - crop.l - crop.r);
+          const ih = h / Math.max(0.01, 1 - crop.t - crop.b);
+          wrap.classList.add('cropped');
+          wrap.style.width = w + 'px';
+          wrap.style.height = h + 'px';
+          img.style.width = iw + 'px';
+          img.style.height = ih + 'px';
+          img.style.marginLeft = -crop.l * iw + 'px';
+          img.style.marginTop = -crop.t * ih + 'px';
+        } else {
+          wrap.classList.remove('cropped');
+          wrap.style.width = '';
+          wrap.style.height = '';
+          img.style.marginLeft = '';
+          img.style.marginTop = '';
+          img.style.width = w ? w + 'px' : '';
+          img.style.height = h ? h + 'px' : '';
+        }
+      };
       const apply = (n: typeof node) => {
-        img.src = n.attrs.src;
+        if (img.getAttribute('src') !== n.attrs.src) img.src = n.attrs.src;
         if (n.attrs.alt) img.alt = n.attrs.alt;
-        img.style.width = n.attrs.width ? n.attrs.width + 'px' : '';
-        img.style.height = n.attrs.height ? n.attrs.height + 'px' : '';
+        layout(n.attrs.width, n.attrs.height, cropOf(n.attrs.crop));
       };
       apply(node);
       img.addEventListener('load', () => window.dispatchEvent(new Event('khwp:relayout')));
@@ -67,23 +116,47 @@ export const KImage = Image.extend({
       handle.addEventListener('mousedown', (e) => {
         e.preventDefault();
         e.stopPropagation();
+        const cropping = e.shiftKey;
         const startX = e.clientX;
-        const startW = img.offsetWidth;
-        const startH = img.offsetHeight;
+        const startY = e.clientY;
+        const startW = wrap.offsetWidth || img.offsetWidth;
+        const startH = wrap.offsetHeight || img.offsetHeight;
         const ratio = startH / Math.max(1, startW);
+        const c0 = cropOf(current.attrs.crop) || { t: 0, r: 0, b: 0, l: 0 };
+        // 자르기 기준: 원본 전체가 화면에 그려질 크기
+        const fullW = startW / Math.max(0.01, 1 - c0.l - c0.r);
+        const fullH = startH / Math.max(0.01, 1 - c0.t - c0.b);
+        let res = { w: startW, h: startH, crop: c0 as Crop | null };
         const move = (ev: MouseEvent) => {
-          const w = Math.max(16, startW + (ev.clientX - startX) / viewState.zoom);
-          img.style.width = w + 'px';
-          img.style.height = w * ratio + 'px';
+          const dx = (ev.clientX - startX) / viewState.zoom;
+          const dy = (ev.clientY - startY) / viewState.zoom;
+          if (cropping) {
+            const r = Math.min(1 - c0.l - 0.05, Math.max(0, c0.r - dx / fullW));
+            const b = Math.min(1 - c0.t - 0.05, Math.max(0, c0.b - dy / fullH));
+            const crop = { ...c0, r, b };
+            const w = fullW * (1 - crop.l - crop.r);
+            const h = fullH * (1 - crop.t - crop.b);
+            res = { w, h, crop };
+            layout(w, h, crop);
+          } else {
+            const w = Math.max(16, startW + dx);
+            res = { w, h: w * ratio, crop: cropOf(c0) };
+            layout(res.w, res.h, res.crop);
+          }
         };
         const up = () => {
           window.removeEventListener('mousemove', move);
           window.removeEventListener('mouseup', up);
           const pos = typeof getPos === 'function' ? getPos() : null;
           if (pos == null) return;
-          const w = Math.round(img.offsetWidth);
-          const h = Math.round(img.offsetHeight);
-          editor.view.dispatch(editor.view.state.tr.setNodeMarkup(pos, undefined, { ...current.attrs, width: w, height: h }));
+          editor.view.dispatch(
+            editor.view.state.tr.setNodeMarkup(pos, undefined, {
+              ...current.attrs,
+              width: Math.round(res.w),
+              height: Math.round(res.h),
+              crop: cropOf(res.crop),
+            }),
+          );
         };
         window.addEventListener('mousemove', move);
         window.addEventListener('mouseup', up);
@@ -300,9 +373,26 @@ export const KTableHeader = TableHeader.extend({
 
 /** 표 속성(테두리 없음, 셀 안 여백, 정렬)을 <table>에 반영하는 NodeView */
 class KTableView extends TableView {
-  constructor(node: PMNode, cellMinWidth: number) {
+  constructor(node: PMNode, cellMinWidth: number, view?: EditorView) {
     super(node, cellMinWidth);
     this.applyAttrs(node);
+    // 표 전체 선택 손잡이 (왼쪽 위)
+    const handle = document.createElement('div');
+    handle.className = 'table-handle';
+    handle.contentEditable = 'false';
+    handle.title = '표 선택 (끌지 말고 누르기) — 선택 후 Delete로 지우기, Ctrl+X/C로 오려 두기·복사';
+    handle.textContent = '⊞';
+    handle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!view) return;
+      selectTableAtDom(view, this.table);
+    });
+    this.dom.appendChild(handle);
+  }
+  ignoreMutation(record: any) {
+    if (record.target && (record.target as HTMLElement).classList?.contains('table-handle')) return true;
+    return super.ignoreMutation(record);
   }
   update(node: PMNode) {
     const ok = super.update(node);
@@ -318,6 +408,23 @@ class KTableView extends TableView {
     const align = node.attrs.align;
     t.style.marginLeft = align === 'center' || align === 'right' ? 'auto' : '';
     t.style.marginRight = align === 'center' ? 'auto' : '';
+  }
+}
+
+/** DOM 속 표를 노드 선택으로 */
+export function selectTableAtDom(view: EditorView, table: HTMLElement) {
+  try {
+    const inside = view.posAtDOM(table, 0);
+    const $p = view.state.doc.resolve(inside);
+    for (let d = $p.depth; d >= 0; d--) {
+      if ($p.node(d).type.name === 'table') {
+        view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, $p.before(d))));
+        view.focus();
+        return;
+      }
+    }
+  } catch {
+    /* 무시 */
   }
 }
 

@@ -1,5 +1,6 @@
 import type { Editor } from '@tiptap/react';
 import { CellSelection } from '@tiptap/pm/tables';
+import { NodeSelection } from '@tiptap/pm/state';
 import { app } from './controller';
 import { platform } from '../platform';
 import { bytesToDataUrl, mimeFromExt, splitExt } from '../formats/common';
@@ -88,9 +89,57 @@ export function applyFormatPainter() {
   app.set({ painter: null });
 }
 
+/** 표를 노드로 선택 (복사·오려 두기·지우기용) */
+export function selectTable() {
+  const editor = ed();
+  if (!editor) return;
+  const sel = editor.state.selection as any;
+  const $from = sel.$anchorCell || editor.state.selection.$from;
+  for (let d = $from.depth; d > 0; d--) {
+    if ($from.node(d).type.name === 'table') {
+      editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, $from.before(d))));
+      editor.view.focus();
+      return;
+    }
+  }
+}
+
+/** F5: 셀 → (다시) 표의 모든 셀 → (다시) 표 전체 */
 function selectCurrentCell() {
   const editor = ed();
   if (!editor) return;
+  const cur = editor.state.selection;
+  if (cur instanceof CellSelection) {
+    const $a = cur.$anchorCell;
+    let tableDepth = -1;
+    for (let d = $a.depth; d > 0; d--) if ($a.node(d).type.name === 'table') tableDepth = d;
+    if (tableDepth < 0) return;
+    const table = $a.node(tableDepth);
+    const start = $a.start(tableDepth);
+    let first = -1;
+    let last = -1;
+    table.descendants((n, pos) => {
+      if (n.type.name === 'tableCell' || n.type.name === 'tableHeader') {
+        if (first < 0) first = start + pos;
+        last = start + pos;
+        return false;
+      }
+      return true;
+    });
+    let count = 0;
+    cur.forEachCell(() => count++);
+    let total = 0;
+    table.descendants((n) => {
+      if (n.type.name === 'tableCell' || n.type.name === 'tableHeader') {
+        total++;
+        return false;
+      }
+      return true;
+    });
+    if (count < total) editor.view.dispatch(editor.state.tr.setSelection(CellSelection.create(editor.state.doc, first, last)));
+    else selectTable();
+    return;
+  }
   const { $from } = editor.state.selection;
   for (let d = $from.depth; d > 0; d--) {
     const n = $from.node(d);
@@ -170,6 +219,22 @@ export const commands: Record<string, Command> = {
     run: async () => insertImagesFromFiles(await platform.pickImages()),
     enabled: hasDoc,
   },
+  'image.crop': { label: '그림 자르기...', icon: 'Crop', run: () => app.openDialog('imageCrop'), enabled: () => isImageSelected() },
+  'image.uncrop': {
+    label: '자르기 취소',
+    run: () => {
+      const editor = ed();
+      const sel = editor?.state.selection;
+      if (!editor || !(sel instanceof NodeSelection) || sel.node.type.name !== 'image') return;
+      const a = sel.node.attrs;
+      const c = a.crop;
+      if (!c) return;
+      const w = a.width ? Math.round(a.width / Math.max(0.01, 1 - c.l - c.r)) : null;
+      const h = a.height ? Math.round(a.height / Math.max(0.01, 1 - c.t - c.b)) : null;
+      editor.view.dispatch(editor.state.tr.setNodeMarkup(sel.from, undefined, { ...a, crop: null, width: w, height: h }));
+    },
+    enabled: () => isImageSelected() && !!(ed()!.state.selection as NodeSelection).node.attrs.crop,
+  },
   'insert.link': { label: '하이퍼링크...', icon: 'Link', shortcut: 'Ctrl+K,H', keys: ['Ctrl+K'], run: () => app.openDialog('link'), enabled: hasDoc },
   'insert.symbol': { label: '문자표...', icon: 'Omega', shortcut: 'Ctrl+F10', keys: ['Ctrl+F10'], run: () => app.openDialog('symbol'), enabled: hasDoc },
   'insert.footnote': { label: '각주', icon: 'Superscript', shortcut: 'Ctrl+N,N', run: () => app.openDialog('footnote', { pos: null, text: '' }), enabled: hasDoc },
@@ -241,7 +306,8 @@ export const commands: Record<string, Command> = {
   'table.delete': { label: '표 지우기', icon: 'Trash2', run: () => chain().deleteTable().run(), enabled: inTable },
   'table.merge': { label: '셀 합치기', icon: 'Merge', shortcut: 'M', run: () => chain().mergeCells().run(), enabled: () => !!ed()?.can().mergeCells() },
   'table.split': { label: '셀 나누기', icon: 'Split', shortcut: 'S', run: () => chain().splitCell().run(), enabled: () => !!ed()?.can().splitCell() },
-  'table.selectCell': { label: '셀 블록 지정', shortcut: 'F5', keys: ['F5'], run: selectCurrentCell, enabled: inTable },
+  'table.selectCell': { label: '셀 블록 지정 (F5 반복: 모든 셀 → 표)', shortcut: 'F5', keys: ['F5'], run: selectCurrentCell, enabled: inTable },
+  'table.select': { label: '표 선택', icon: 'Table', run: selectTable, enabled: inTable },
   'table.header': { label: '제목 줄 지정/해제', icon: 'PanelTopOpen', run: () => chain().toggleHeaderRow().run(), enabled: inTable },
   'table.cellProps': { label: '셀 테두리/배경...', icon: 'PaintBucket', shortcut: 'L', run: () => app.openDialog('cellProps'), enabled: inTable },
   'table.equalWidth': {
@@ -295,6 +361,11 @@ export const commands: Record<string, Command> = {
   'tools.about': { label: 'K-HWP 정보', icon: 'Info', run: () => app.openDialog('about') },
   'tools.overwrite': { label: '삽입/수정 모드 전환', shortcut: 'Insert', run: () => chain().toggleOverwrite().run(), enabled: hasDoc },
 };
+
+function isImageSelected() {
+  const sel = ed()?.state.selection;
+  return sel instanceof NodeSelection && sel.node.type.name === 'image';
+}
 
 function alignIs(a: string) {
   const editor = ed();

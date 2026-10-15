@@ -1,4 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { NodeSelection } from '@tiptap/pm/state';
+import { cropOf, type Crop } from '../../editor/extensions/nodes';
 import { app } from '../../app/controller';
 import { commands } from '../../app/commands';
 import { Modal, OkCancel, Fieldset, NumberInput, ColorField, Seg, FontCombo } from '../widgets';
@@ -541,6 +543,138 @@ export function ConfirmDialog() {
       }
     >
       <div style={{ lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{st.message}</div>
+    </Modal>
+  );
+}
+
+// ---------------- 그림 자르기 ----------------
+export function ImageCropDialog({ onClose }: { onClose: () => void }) {
+  const editor = app.active!.editor;
+  const sel = editor.state.selection;
+  const node = sel instanceof NodeSelection && sel.node.type.name === 'image' ? sel.node : null;
+  const pos = node ? sel.from : -1;
+  const c0: Crop = cropOf(node?.attrs.crop) || { t: 0, r: 0, b: 0, l: 0 };
+  const [crop, setCrop] = useState<Crop>(c0);
+  const [nat, setNat] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    if (!node) return;
+    const im = new Image();
+    im.onload = () => setNat({ w: im.naturalWidth || 200, h: im.naturalHeight || 150 });
+    im.src = node.attrs.src;
+  }, []);
+  if (!node) {
+    return (
+      <Modal title="그림 자르기" onClose={onClose} width={340} footer={<button className="btn" onClick={onClose}>닫기</button>}>
+        그림을 먼저 선택하세요. (그림을 한 번 누르면 선택됩니다)
+      </Modal>
+    );
+  }
+  const sc = nat ? Math.min(460 / nat.w, 340 / nat.h, 1) : 1;
+  const W = nat ? nat.w * sc : 300;
+  const H = nat ? nat.h * sc : 200;
+  const box = { x: crop.l * W, y: crop.t * H, w: W * (1 - crop.l - crop.r), h: H * (1 - crop.t - crop.b) };
+  const MIN = 0.05;
+  const drag = (kind: string) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const sx = e.clientX;
+    const sy = e.clientY;
+    const s0 = { ...crop };
+    const clamp = (v: number) => Math.max(0, Math.min(1, v));
+    const move = (ev: MouseEvent) => {
+      const dx = (ev.clientX - sx) / W;
+      const dy = (ev.clientY - sy) / H;
+      const c = { ...s0 };
+      if (kind === 'move') {
+        const mx = Math.max(-s0.l, Math.min(s0.r, dx));
+        const my = Math.max(-s0.t, Math.min(s0.b, dy));
+        c.l = s0.l + mx;
+        c.r = s0.r - mx;
+        c.t = s0.t + my;
+        c.b = s0.b - my;
+      } else {
+        if (kind.includes('w')) c.l = clamp(Math.min(s0.l + dx, 1 - s0.r - MIN));
+        if (kind.includes('e')) c.r = clamp(Math.min(s0.r - dx, 1 - s0.l - MIN));
+        if (kind.includes('n')) c.t = clamp(Math.min(s0.t + dy, 1 - s0.b - MIN));
+        if (kind.includes('s')) c.b = clamp(Math.min(s0.b - dy, 1 - s0.t - MIN));
+      }
+      setCrop(c);
+    };
+    const up = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  };
+  const ok = () => {
+    // 원본 전체가 그려지던 크기를 유지한 채 남은 부분만 보이게
+    const curW = node.attrs.width || nat?.w || 200;
+    const curH = node.attrs.height || nat?.h || 150;
+    const fullW = curW / Math.max(0.01, 1 - c0.l - c0.r);
+    const fullH = curH / Math.max(0.01, 1 - c0.t - c0.b);
+    const w = Math.round(fullW * (1 - crop.l - crop.r));
+    const h = Math.round(fullH * (1 - crop.t - crop.b));
+    editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, crop: cropOf(crop), width: w, height: h }));
+    onClose();
+  };
+  const pct = (v: number) => Math.round(v * 1000) / 10;
+  const setPct = (k: keyof Crop) => (v: number) => {
+    const c = { ...crop, [k]: Math.max(0, Math.min(0.95, v / 100)) };
+    if (c.l + c.r > 0.95 || c.t + c.b > 0.95) return;
+    setCrop(c);
+  };
+  const handles: [string, number, number][] = [
+    ['nw', box.x, box.y],
+    ['n', box.x + box.w / 2, box.y],
+    ['ne', box.x + box.w, box.y],
+    ['w', box.x, box.y + box.h / 2],
+    ['e', box.x + box.w, box.y + box.h / 2],
+    ['sw', box.x, box.y + box.h],
+    ['s', box.x + box.w / 2, box.y + box.h],
+    ['se', box.x + box.w, box.y + box.h],
+  ];
+  const cursor: Record<string, string> = { nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize', n: 'ns-resize', s: 'ns-resize', w: 'ew-resize', e: 'ew-resize' };
+  return (
+    <Modal
+      title="그림 자르기"
+      onClose={onClose}
+      width={560}
+      onEnter={ok}
+      footer={
+        <OkCancel
+          onOk={ok}
+          onCancel={onClose}
+          extra={
+            <button className="btn" style={{ marginRight: 'auto' }} onClick={() => setCrop({ t: 0, r: 0, b: 0, l: 0 })}>
+              원래대로
+            </button>
+          }
+        />
+      }
+    >
+      <div style={{ textAlign: 'center', marginBottom: 10 }}>
+        <div className="crop-stage" style={{ width: W, height: H }}>
+          <img src={node.attrs.src} style={{ width: W, height: H }} alt="" />
+          <div className="crop-shade" style={{ left: 0, top: 0, width: W, height: box.y }} />
+          <div className="crop-shade" style={{ left: 0, top: box.y + box.h, width: W, height: H - box.y - box.h }} />
+          <div className="crop-shade" style={{ left: 0, top: box.y, width: box.x, height: box.h }} />
+          <div className="crop-shade" style={{ left: box.x + box.w, top: box.y, width: W - box.x - box.w, height: box.h }} />
+          <div className="crop-box" style={{ left: box.x, top: box.y, width: box.w, height: box.h }} onMouseDown={drag('move')} />
+          {handles.map(([k, x, y]) => (
+            <div key={k} className="crop-h" style={{ left: x, top: y, cursor: cursor[k] }} onMouseDown={drag(k)} />
+          ))}
+        </div>
+      </div>
+      <div className="row wrap" style={{ gap: 14, justifyContent: 'center' }}>
+        <span className="row">위 <NumberInput value={pct(crop.t)} onChange={setPct('t')} min={0} max={95} width={56} unit="%" /></span>
+        <span className="row">아래 <NumberInput value={pct(crop.b)} onChange={setPct('b')} min={0} max={95} width={56} unit="%" /></span>
+        <span className="row">왼쪽 <NumberInput value={pct(crop.l)} onChange={setPct('l')} min={0} max={95} width={56} unit="%" /></span>
+        <span className="row">오른쪽 <NumberInput value={pct(crop.r)} onChange={setPct('r')} min={0} max={95} width={56} unit="%" /></span>
+      </div>
+      <div className="unit" style={{ marginTop: 8, textAlign: 'center' }}>
+        테두리나 모서리를 끌어 남길 부분을 정합니다. 편집 화면에서 그림 모서리를 Shift+끌기 해도 자를 수 있습니다.
+      </div>
     </Modal>
   );
 }

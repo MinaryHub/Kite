@@ -15,6 +15,7 @@ import {
   StyleDialog,
   AboutDialog,
   ConfirmDialog,
+  ImageCropDialog,
 } from './dialogs/MiscDialogs';
 
 export function Dialogs() {
@@ -69,6 +70,9 @@ export function Dialogs() {
         break;
       case 'style':
         el = <StyleDialog onClose={close} />;
+        break;
+      case 'imageCrop':
+        el = <ImageCropDialog onClose={close} />;
         break;
       case 'about':
         el = <AboutDialog onClose={close} />;

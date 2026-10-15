@@ -38,7 +38,7 @@ export interface ParaStyle {
 export type FlatInline =
   | { type: 'text'; text: string; style: CharStyle; link: string | null }
   | { type: 'break' }
-  | { type: 'image'; src: string; width: number | null; height: number | null; style: CharStyle }
+  | { type: 'image'; src: string; width: number | null; height: number | null; style: CharStyle; crop: { t: number; r: number; b: number; l: number } | null }
   | { type: 'footnote'; text: string; style: CharStyle };
 
 export interface FlatPara {
@@ -357,7 +357,7 @@ function flattenPara(n: JNode, ctx: Ctx, level: number): FlatPara {
     } else if (c.type === 'hardBreak') inlines.push({ type: 'break' });
     else if (c.type === 'image') {
       const { style: cs } = applyMarks(base, c.marks);
-      inlines.push({ type: 'image', src: c.attrs?.src, width: c.attrs?.width || null, height: c.attrs?.height || null, style: cs });
+      inlines.push({ type: 'image', src: c.attrs?.src, width: c.attrs?.width || null, height: c.attrs?.height || null, style: cs, crop: c.attrs?.crop || null });
     } else if (c.type === 'footnote') {
       inlines.push({ type: 'footnote', text: c.attrs?.text || '', style: applyMarks(base, c.marks).style });
     }

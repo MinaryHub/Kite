@@ -194,7 +194,7 @@ class SectionWriter {
         const info = this.images.get(it.src);
         ensureRun(this.reg.char(it.style), null);
         closeT();
-        if (info) xml += this.pic(info, it.width, it.height);
+        if (info) xml += this.pic(info, it.width, it.height, it.crop);
       } else if (it.type === 'footnote') {
         ensureRun(this.reg.char(it.style), curLink);
         closeT();
@@ -205,7 +205,7 @@ class SectionWriter {
     return xml;
   }
 
-  private pic(info: { id: string; w: number; h: number }, wPx: number | null, hPx: number | null): string {
+  private pic(info: { id: string; w: number; h: number }, wPx: number | null, hPx: number | null, crop: { t: number; r: number; b: number; l: number } | null = null): string {
     let w = wPx ? pxToHwp(wPx) : pxToHwp(info.w);
     let h = hPx ? pxToHwp(hPx) : pxToHwp(info.h);
     if (!hPx && wPx) h = Math.round((w * info.h) / Math.max(1, info.w));
@@ -215,8 +215,10 @@ class SectionWriter {
     }
     const ow = pxToHwp(info.w);
     const oh = pxToHwp(info.h);
-    const sx = (w / Math.max(1, ow)).toFixed(6);
-    const sy = (h / Math.max(1, oh)).toFixed(6);
+    const c = crop || { t: 0, r: 0, b: 0, l: 0 };
+    const sx = (w / Math.max(1, ow * (1 - c.l - c.r))).toFixed(6);
+    const sy = (h / Math.max(1, oh * (1 - c.t - c.b))).toFixed(6);
+    const clip = `left="${Math.round(ow * c.l)}" right="${Math.round(ow * (1 - c.r))}" top="${Math.round(oh * c.t)}" bottom="${Math.round(oh * (1 - c.b))}"`;
     const id = nextId();
     return (
       `<hp:pic id="${id}" zOrder="${this.zOrder++}" numberingType="PICTURE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" href="" groupLevel="0" instid="${id - 1}" reverse="0">` +
@@ -224,7 +226,7 @@ class SectionWriter {
       `<hp:flip horizontal="0" vertical="0"/><hp:rotationInfo angle="0" centerX="${Math.round(w / 2)}" centerY="${Math.round(h / 2)}" rotateimage="1"/>` +
       `<hp:renderingInfo><hc:transMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/><hc:scaMatrix e1="${sx}" e2="0" e3="0" e4="0" e5="${sy}" e6="0"/><hc:rotMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/></hp:renderingInfo>` +
       `<hp:imgRect><hc:pt0 x="0" y="0"/><hc:pt1 x="${ow}" y="0"/><hc:pt2 x="${ow}" y="${oh}"/><hc:pt3 x="0" y="${oh}"/></hp:imgRect>` +
-      `<hp:imgClip left="0" right="${ow}" top="0" bottom="${oh}"/><hp:inMargin left="0" right="0" top="0" bottom="0"/>` +
+      `<hp:imgClip ${clip}/><hp:inMargin left="0" right="0" top="0" bottom="0"/>` +
       `<hp:imgDim dimwidth="${ow}" dimheight="${oh}"/><hc:img binaryItemIDRef="${info.id}" bright="0" contrast="0" effect="REAL_PIC" alpha="0"/><hp:effects/>` +
       `<hp:sz width="${w}" widthRelTo="ABSOLUTE" height="${h}" heightRelTo="ABSOLUTE" protect="0"/>` +
       `<hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/>` +

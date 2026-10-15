@@ -82,7 +82,7 @@ function textRuns(text: string, c: CharStyle): string {
   return `<w:r>${rPr(c)}${inner}</w:r>`;
 }
 
-function drawing(ctx: Ctx, info: { rid: string; w: number; h: number; name: string }, wPx: number | null, hPx: number | null): string {
+function drawing(ctx: Ctx, info: { rid: string; w: number; h: number; name: string }, wPx: number | null, hPx: number | null, crop: { t: number; r: number; b: number; l: number } | null = null): string {
   let w = wPx || info.w;
   let h = hPx || (wPx ? Math.round((wPx * info.h) / Math.max(1, info.w)) : info.h);
   const maxPx = ctx.bodyWidthTw / 15;
@@ -97,7 +97,7 @@ function drawing(ctx: Ctx, info: { rid: string; w: number; h: number; name: stri
     `<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>` +
     `<wp:docPr id="${id}" name="그림 ${id}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>` +
     `<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${id}" name="${info.name}"/><pic:cNvPicPr/></pic:nvPicPr>` +
-    `<pic:blipFill><a:blip r:embed="${info.rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
+    `<pic:blipFill><a:blip r:embed="${info.rid}"/>${crop ? `<a:srcRect l="${Math.round(crop.l * 100000)}" t="${Math.round(crop.t * 100000)}" r="${Math.round(crop.r * 100000)}" b="${Math.round(crop.b * 100000)}"/>` : ''}<a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
     `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>`
   );
 }
@@ -125,7 +125,7 @@ function paragraphXml(ctx: Ctx, p: FlatPara): string {
     else if (it.type === 'break') x += '<w:r><w:br/></w:r>';
     else if (it.type === 'image') {
       const info = ctx.images.get(it.src);
-      if (info) x += `<w:r>${rPr(it.style)}${drawing(ctx, info, it.width, it.height)}</w:r>`;
+      if (info) x += `<w:r>${rPr(it.style)}${drawing(ctx, info, it.width, it.height, it.crop)}</w:r>`;
     } else if (it.type === 'footnote') {
       ctx.footnotes.push(it.text);
       const id = ctx.footnotes.length + 1;

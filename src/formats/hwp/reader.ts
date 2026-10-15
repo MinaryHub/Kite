@@ -22,6 +22,7 @@ import {
   HWP_BORDER_WIDTHS,
   hwpBorderStyle,
   borderCss,
+  normCrop,
   type BorderSide,
 } from '../common';
 import { charMarks, paraAttrs, type CharPr, type ParaPr, type BorderFill, type Numbering } from '../hwpx/reader';
@@ -664,7 +665,11 @@ class HwpConverter {
       this.warnings.push(`그림 데이터를 찾을 수 없음 (BIN${binId.toString(16).toUpperCase().padStart(4, '0')})`);
       src = placeholderImage('그림', w || 100, h || 60);
     }
-    return { type: 'image', attrs: { src, width: w || null, height: h || null } };
+    const ow = p.data.length >= 90 ? u32(p, 82) : Math.abs(i32(p, 20) - i32(p, 12));
+    const oh = p.data.length >= 90 ? u32(p, 86) : Math.abs(i32(p, 32) - i32(p, 16));
+    let crop = null;
+    if (ow > 0 && oh > 0) crop = normCrop(i32(p, 48) / oh, 1 - i32(p, 52) / ow, 1 - i32(p, 56) / oh, i32(p, 44) / ow);
+    return { type: 'image', attrs: { src, width: w || null, height: h || null, crop } };
   }
 }
 

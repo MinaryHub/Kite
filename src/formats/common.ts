@@ -500,6 +500,15 @@ export function applyNumFormat(template: string, values: number[], formats: stri
     });
 }
 
+// ---------- 그림 자르기 ----------
+/** 잘라 낸 비율(0~1). 모두 0이면 null */
+export function normCrop(t: number, r: number, b: number, l: number): { t: number; r: number; b: number; l: number } | null {
+  const c = (v: number) => (isFinite(v) ? Math.max(0, Math.min(0.95, Math.round(v * 10000) / 10000)) : 0);
+  const x = { t: c(t), r: c(r), b: c(b), l: c(l) };
+  if (x.l + x.r > 0.95 || x.t + x.b > 0.95) return null;
+  return x.t || x.r || x.b || x.l ? x : null;
+}
+
 // ---------- 셀 테두리 ----------
 export interface BorderSide {
   /** 굵기 mm */

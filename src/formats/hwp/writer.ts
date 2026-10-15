@@ -438,7 +438,10 @@ class BodyWriter {
         }
         pb.maxSize = Math.max(pb.maxSize, hv / 100);
         const binId = info.binId;
-        pb.ctrls.push((w, lv) => this.picture(w, lv, wv, hv, binId));
+        const crop = it.crop;
+        const ow = pxToHwp(info.w);
+        const oh = pxToHwp(info.h);
+        pb.ctrls.push((w, lv) => this.picture(w, lv, wv, hv, binId, ow, oh, crop));
       } else if (it.type === 'footnote') {
         this.setShape(pb, this.reg.char(it.style));
         this.ctrlChars(pb, 17, 'fn  ');
@@ -450,7 +453,8 @@ class BodyWriter {
     endLink();
   }
 
-  private picture(w: RecWriter, lv: number, wv: number, hv: number, binId: number) {
+  private picture(w: RecWriter, lv: number, wv: number, hv: number, binId: number, ow = wv, oh = hv, crop: { t: number; r: number; b: number; l: number } | null = null) {
+    const c = crop || { t: 0, r: 0, b: 0, l: 0 };
     const id = inst();
     // 개체 공통 속성: 글자처럼 취급(bit0)
     w.rec(
@@ -474,10 +478,10 @@ class BodyWriter {
       .i32(hv)
       .i32(0)
       .i32(hv)
-      .i32(0)
-      .i32(0)
-      .i32(wv)
-      .i32(hv)
+      .i32(Math.round(ow * c.l))
+      .i32(Math.round(oh * c.t))
+      .i32(Math.round(ow * (1 - c.r)))
+      .i32(Math.round(oh * (1 - c.b)))
       .u16(0)
       .u16(0)
       .u16(0)
@@ -489,8 +493,8 @@ class BodyWriter {
       .u8(0)
       .u32(id)
       .u32(0)
-      .u32(wv)
-      .u32(hv)
+      .u32(ow)
+      .u32(oh)
       .u8(0);
     w.rec(TAG.SHAPE_COMPONENT_PICTURE, lv + 2, pic.out());
   }

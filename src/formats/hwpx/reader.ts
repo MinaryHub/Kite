@@ -28,6 +28,7 @@ import {
   NumberingCounter,
   borderCss,
   hwpxBorderStyle,
+  normCrop,
   type BorderSide,
   applyNumFormat,
 } from '../common';
@@ -611,7 +612,17 @@ export class HwpxConverter {
       this.warnings.push(`그림을 찾을 수 없음: ${ref}`);
       src = placeholderImage('그림 없음', w || 100, h || 60);
     }
-    return { type: 'image', attrs: { src, width: w || null, height: h || null } };
+    // 자르기: imgClip은 원본(imgDim) 좌표
+    const dim = kid(pic, 'imgDim');
+    const org = kid(pic, 'orgSz');
+    const dw = numAttr(dim, 'dimwidth', 0) || numAttr(org, 'width', 0);
+    const dh = numAttr(dim, 'dimheight', 0) || numAttr(org, 'height', 0);
+    const clip = kid(pic, 'imgClip');
+    let crop = null;
+    if (clip && dw && dh) {
+      crop = normCrop(numAttr(clip, 'top', 0) / dh, 1 - numAttr(clip, 'right', dw) / dw, 1 - numAttr(clip, 'bottom', dh) / dh, numAttr(clip, 'left', 0) / dw);
+    }
+    return { type: 'image', attrs: { src, width: w || null, height: h || null, crop } };
   }
 
   /** 글상자 등 도형 → 안의 문단 */

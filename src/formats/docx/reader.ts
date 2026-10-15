@@ -18,6 +18,7 @@ import {
   paragraph,
   parseXml,
   placeholderImage,
+  normCrop,
   round,
   textNode,
   twipToMm,
@@ -770,7 +771,10 @@ class DocxReader {
       for (const blip of blips) {
         const rid = attr(blip, 'embed') || attr(blip, 'link');
         const src = rid ? this.images.get(rid) : undefined;
-        if (src) out.push({ type: 'image', attrs: { src, width: w || null, height: h || null } });
+        const sr = descendant(d, 'srcRect');
+        const pv = (k: string) => (parseFloat(attr(sr, k) || '0') || 0) / 100000;
+        const crop = sr ? normCrop(pv('t'), pv('r'), pv('b'), pv('l')) : null;
+        if (src) out.push({ type: 'image', attrs: { src, width: w || null, height: h || null, crop } });
         else out.push({ type: 'image', attrs: { src: placeholderImage('그림', w || 120, h || 80), width: w || 120, height: h || 80 } });
         if (blips.length === 1) break;
       }

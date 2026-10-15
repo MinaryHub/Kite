@@ -46,6 +46,7 @@ export function showContextMenu(x: number, y: number, tab: DocTab) {
     );
   }
   if (editor.isActive('image')) {
+    items.push('image.crop', 'image.uncrop');
     items.push(
       {
         label: '그림 원래 크기로',
@@ -65,6 +66,7 @@ export function showContextMenu(x: number, y: number, tab: DocTab) {
   items.push('format.char', 'format.para', 'format.style', '-');
   if (editor.isActive('table')) {
     items.push(
+      'table.select',
       'table.cellProps',
       'table.merge',
       'table.split',
