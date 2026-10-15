@@ -4,6 +4,7 @@ import BulletList from '@tiptap/extension-bullet-list';
 import OrderedList from '@tiptap/extension-ordered-list';
 import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
+import TableRow from '@tiptap/extension-table-row';
 import Table, { TableView } from '@tiptap/extension-table';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { NodeSelection, Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
@@ -365,6 +366,23 @@ export const KTableCell = TableCell.extend({
   },
 });
 
+/** 표 줄: 높이(px, 최소 높이) */
+export const KTableRow = TableRow.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      height: {
+        default: null,
+        parseHTML: (el: HTMLElement) => {
+          const v = parseFloat(el.style.height);
+          return v > 0 ? v : null;
+        },
+        renderHTML: (a: Record<string, any>) => (a.height ? { style: `height: ${a.height}px` } : {}),
+      },
+    };
+  },
+});
+
 export const KTableHeader = TableHeader.extend({
   addAttributes() {
     return { ...this.parent?.(), ...cellAttrs };
@@ -453,7 +471,11 @@ export const KTable = Table.extend({
       },
     };
   },
-}).configure({ resizable: true, cellMinWidth: 4, lastColumnResizable: true, allowTableNodeSelection: true, View: KTableView as any });
+  // 열/행 크기 조절은 tableResize 확장이 맡는다 (여백선 스냅). NodeView 는 직접 연결.
+  addNodeView() {
+    return ({ node, editor }) => new KTableView(node, 4, editor.view) as any;
+  },
+}).configure({ resizable: false, cellMinWidth: 4, allowTableNodeSelection: true });
 
 // ---------------- 탭 키 / 수정(겹쳐쓰기) 모드 ----------------
 const overwriteKey = new PluginKey('overwrite');

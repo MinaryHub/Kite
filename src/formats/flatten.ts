@@ -75,6 +75,8 @@ export interface FlatTable {
   align: 'left' | 'center' | 'right';
   /** 셀 좌우 안 여백 (px) */
   cellPadPx: number;
+  /** 줄 높이 (px, 최소 높이). 없으면 null */
+  rowHeightsPx: (number | null)[];
 }
 
 export type FlatBlock = FlatPara | FlatTable;
@@ -423,5 +425,6 @@ function flattenTable(n: JNode, ctx: Ctx): FlatTable {
   const colWidthsPx = widths.map((w) => (w == null ? each : w));
   for (const row of cells) for (const cell of row) if (!cell.widthPx) cell.widthPx = colWidthsPx.slice(cell.col, cell.col + cell.colspan).reduce((a, b) => a + b, 0);
   const cellPadPx = n.attrs?.cellPadding != null ? +n.attrs.cellPadding : 6.8;
-  return { kind: 'table', rows: rowsJ.length, cols: maxCols, colWidthsPx, cells, pageBreakBefore: false, align: n.attrs?.align || 'left', cellPadPx };
+  const rowHeightsPx = rowsJ.map((r) => ((r.attrs?.height ?? 0) > 0 ? +r.attrs!.height : null));
+  return { kind: 'table', rows: rowsJ.length, cols: maxCols, colWidthsPx, cells, pageBreakBefore: false, align: n.attrs?.align || 'left', cellPadPx, rowHeightsPx };
 }

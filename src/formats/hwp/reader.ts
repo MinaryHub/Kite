@@ -577,6 +577,7 @@ class HwpConverter {
     const nRowsDecl = tbl ? u16(tbl, 4) : 0;
     type Cell = { row: number; col: number; cs: number; rs: number; w: number; node: JNode };
     const cells: Cell[] = [];
+    const rowH: number[] = [];
     let cur: { lh: Rec; paras: Rec[] } | null = null;
     const finish = () => {
       if (!cur) return;
@@ -587,6 +588,8 @@ class HwpConverter {
       const cs = Math.max(1, u16(lh, 12));
       const rs = Math.max(1, u16(lh, 14));
       const w = hwpToPx(u32(lh, 16));
+      // 셀 높이에는 위/아래 안 여백이 들어 있다 (편집기 줄 높이와 맞추려고 뺀다)
+      if (rs === 1) rowH[row] = Math.max(rowH[row] || 0, hwpToPx(u32(lh, 20) - CELL_VMARGIN_HWP));
       const bfId = u16(lh, 32);
       const bf = bfId ? this.info.borderFills[bfId - 1] : undefined;
       let content = this.convertParagraphs(cur.paras, true).filter((n) => n.type !== 'pageBreak');
@@ -621,7 +624,7 @@ class HwpConverter {
     }
     finish();
     const nColsDecl = tbl ? u16(tbl, 6) : 0;
-    const t = assembleTable(cells, nRowsDecl, nColsDecl, hwpToPx(u32(ctrl, 16)));
+    const t = assembleTable(cells, nRowsDecl, nColsDecl, hwpToPx(u32(ctrl, 16)), rowH);
     if (tbl) t.attrs = { cellPadding: Math.round(hwpToPx((u16(tbl, 10) + u16(tbl, 12)) / 2) * 10) / 10 };
     if (caption && caption.length) (t as any).caption = this.convertParagraphs(caption, true);
     return t;
@@ -674,12 +677,17 @@ class HwpConverter {
 }
 
 /** 셀 목록 → 표 JSON (빈 줄/열 너비 보정 포함) */
+/** 한글 셀의 위+아래 안 여백 기본값 (HWPUNIT, 0.5mm×2). 줄 높이를 읽고 쓸 때 빼고 더한다 */
+export const CELL_VMARGIN_HWP = 282;
+
 export function assembleTable(
   cells: { row: number; col: number; cs: number; rs: number; w: number; node: JNode }[],
   nRowsDecl: number,
   nColsDecl = 0,
   /** 표 전체 너비(px) — 계산한 너비가 더 크면 이 너비에 맞춤 */
   tableWidth = 0,
+  /** 원래 줄 번호별 줄 높이(px, 최소 높이) */
+  rowHeights: (number | null)[] = [],
 ): JNode {
   // 잘못된 값 방어: 칸/줄 합치기 범위를 표 크기 안으로 제한
   const maxCols = nColsDecl > 0 ? nColsDecl : 512;
@@ -695,6 +703,8 @@ export function assembleTable(
   const rowsWithCells = new Set(cells.map((c) => c.row));
   const removed: number[] = [];
   for (let r = 0; r < nRows; r++) if (!rowsWithCells.has(r)) removed.push(r);
+  const keptRows: number[] = [];
+  for (let r = 0; r < nRows; r++) if (rowsWithCells.has(r)) keptRows.push(r);
   if (removed.length) {
     for (const c of cells) {
       c.rs -= removed.filter((r) => r > c.row && r < c.row + c.rs).length;
@@ -709,7 +719,12 @@ export function assembleTable(
   }
   const rows: JNode[] = [...byRow.keys()]
     .sort((a, b) => a - b)
-    .map((r) => ({ type: 'tableRow', content: byRow.get(r)!.sort((a, b) => a.col - b.col).map((c) => c.node) }));
+    .map((r) => {
+      const h = rowHeights[keptRows[r]];
+      const row: JNode = { type: 'tableRow', content: byRow.get(r)!.sort((a, b) => a.col - b.col).map((c) => c.node) };
+      if (h && h > 0 && h < 3000) row.attrs = { height: Math.round(h * 10) / 10 };
+      return row;
+    });
   const nCols = Math.max(1, ...cells.map((c) => c.col + c.cs));
   // 열 경계 계산: 각 셀의 왼쪽/오른쪽 경계를 전파해 정확한 격자 너비를 구한다
   const x: (number | null)[] = new Array(nCols + 1).fill(null);

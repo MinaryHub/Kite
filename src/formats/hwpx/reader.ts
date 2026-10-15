@@ -1,5 +1,5 @@
 import JSZip from 'jszip';
-import { assembleTable } from '../hwp/reader';
+import { CELL_VMARGIN_HWP, assembleTable } from '../hwp/reader';
 import type { DocMeta, DocSettings, LoadedDoc } from '../../types';
 import {
   type JMark,
@@ -651,6 +651,7 @@ export class HwpxConverter {
     type Cell = { row: number; col: number; cs: number; rs: number; w: number; node: JNode };
     const cells: Cell[] = [];
     const rowCnt = numAttr(tbl, 'rowCnt', 0);
+    const rowH: number[] = [];
     kids(tbl, 'tr').forEach((tr, ri) => {
       kids(tr, 'tc').forEach((tc, ci) => {
         const addr = kid(tc, 'cellAddr');
@@ -662,6 +663,7 @@ export class HwpxConverter {
         const cs = Math.max(1, numAttr(span, 'colSpan', 1));
         const rs = Math.max(1, numAttr(span, 'rowSpan', 1));
         const w = hwpToPx(numAttr(sz, 'width', 0));
+        if (rs === 1) rowH[row] = Math.max(rowH[row] || 0, hwpToPx(numAttr(sz, 'height', 0) - CELL_VMARGIN_HWP));
         const bf = this.h.borderFills.get(attr(tc, 'borderFillIDRef') || '');
         let content = this.convertParagraphs(kids(sub, 'p'), { inSub: true });
         content = content.filter((n) => n.type !== 'pageBreak');
@@ -676,7 +678,7 @@ export class HwpxConverter {
         cells.push({ row, col, cs, rs, w, node: { type: 'tableCell', attrs, content } });
       });
     });
-    const t = assembleTable(cells, rowCnt, numAttr(tbl, 'colCnt', 0), hwpToPx(numAttr(kid(tbl, 'sz'), 'width', 0)));
+    const t = assembleTable(cells, rowCnt, numAttr(tbl, 'colCnt', 0), hwpToPx(numAttr(kid(tbl, 'sz'), 'width', 0)), rowH);
     const rows = t.content!;
     const inM = kid(tbl, 'inMargin');
     const tAttrs: Record<string, any> = {};

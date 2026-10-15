@@ -182,7 +182,9 @@ function tableXml(ctx: Ctx, t: FlatTable): string {
     }
     for (const k of cont.filter((x) => x.row === ri)) entries.push({ col: k.col, xml: `<w:tc>${tcPr(k.cell, '<w:vMerge/>')}<w:p/></w:tc>` });
     entries.sort((a, b) => a.col - b.col);
-    x += '<w:tr>' + (ri === 0 && row.some((c) => c.header) ? '<w:trPr><w:tblHeader/></w:trPr>' : '') + entries.map((e) => e.xml).join('') + '</w:tr>';
+    const rh = t.rowHeightsPx?.[ri];
+    const trPr = (ri === 0 && row.some((c) => c.header) ? '<w:tblHeader/>' : '') + (rh ? `<w:trHeight w:val="${Math.round(rh * 15)}" w:hRule="atLeast"/>` : '');
+    x += '<w:tr>' + (trPr ? `<w:trPr>${trPr}</w:trPr>` : '') + entries.map((e) => e.xml).join('') + '</w:tr>';
   });
   x += '</w:tbl>';
   if (t.pageBreakBefore) x = '<w:p><w:r><w:br w:type="page"/></w:r></w:p>' + x;

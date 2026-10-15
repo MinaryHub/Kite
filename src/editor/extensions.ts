@@ -9,7 +9,6 @@ import Highlight from '@tiptap/extension-highlight';
 import Subscript from '@tiptap/extension-subscript';
 import Superscript from '@tiptap/extension-superscript';
 import Link from '@tiptap/extension-link';
-import TableRow from '@tiptap/extension-table-row';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import CharacterCount from '@tiptap/extension-character-count';
@@ -23,13 +22,14 @@ import {
   KBulletList,
   KOrderedList,
   KTable,
-  KTableCell,
+  KTableCell, KTableRow,
   KTableHeader,
   KeyboardExtras,
   CellNoWrap,
 } from './extensions/nodes';
 import { Search } from './extensions/search';
 import { Pagination } from './extensions/pagination';
+import { TableResize } from './extensions/tableResize';
 
 /** 문서 스키마를 구성하는 확장 (편집기 없이 변환에도 사용) */
 export function getExtensions(): AnyExtension[] {
@@ -66,7 +66,7 @@ export function getExtensions(): AnyExtension[] {
     Link.configure({ openOnClick: false, autolink: true, HTMLAttributes: { rel: null, target: null } }),
     KImage,
     KTable,
-    TableRow,
+    KTableRow,
     KTableHeader,
     KTableCell,
     KBulletList,
@@ -82,7 +82,7 @@ export function getExtensions(): AnyExtension[] {
 
 /** 편집 화면용 확장 (스키마 + 편집 기능) */
 export function getEditorExtensions(): AnyExtension[] {
-  return [...getExtensions(), KeyboardExtras, CellNoWrap, Search, CharacterCount, Pagination];
+  return [...getExtensions(), KeyboardExtras, CellNoWrap, Search, CharacterCount, Pagination, TableResize];
 }
 
 let cachedSchema: Schema | null = null;

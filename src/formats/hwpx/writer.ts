@@ -258,10 +258,12 @@ class SectionWriter {
     const scale = Math.min(1, this.bodyWidthHwp / pxToHwp(totalPx));
     const colW = t.colWidthsPx.map((w) => Math.round(pxToHwp(w) * scale));
     const tableW = colW.reduce((a, b) => a + b, 0);
-    const rowH = 1000;
+    // 줄 높이: 지정된 줄은 그 높이, 아니면 최소값 (한글은 셀 높이를 최소 높이로 쓴다)
+    const rowHs = Array.from({ length: t.rows }, (_, i) => (t.rowHeightsPx?.[i] ? Math.max(1000, pxToHwp(t.rowHeightsPx[i]!) + 282) : 1000));
+    const spanH = (r: number, n: number) => rowHs.slice(r, r + n).reduce((a, b) => a + b, 0);
     const id = nextId();
     let xml = `<hp:tbl id="${id}" zOrder="${this.zOrder++}" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="CELL" repeatHeader="1" rowCnt="${t.rows}" colCnt="${t.cols}" cellSpacing="0" borderFillIDRef="3" noAdjust="0">`;
-    xml += `<hp:sz width="${tableW}" widthRelTo="ABSOLUTE" height="${rowH * t.rows}" heightRelTo="ABSOLUTE" protect="0"/>`;
+    xml += `<hp:sz width="${tableW}" widthRelTo="ABSOLUTE" height="${spanH(0, t.rows)}" heightRelTo="ABSOLUTE" protect="0"/>`;
     xml += `<hp:pos treatAsChar="0" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="${t.align === 'center' ? 'CENTER' : t.align === 'right' ? 'RIGHT' : 'LEFT'}" vertOffset="0" horzOffset="0"/>`;
     const pad = pxToHwp(t.cellPadPx);
     xml += `<hp:outMargin left="140" right="140" top="140" bottom="140"/><hp:inMargin left="${pad}" right="${pad}" top="141" bottom="141"/>`;
@@ -275,7 +277,7 @@ class SectionWriter {
         xml += `<hp:tc name="" header="${cell.header ? 1 : 0}" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="${bf}">`;
         xml += this.subList(inner, va);
         xml += `<hp:cellAddr colAddr="${cell.col}" rowAddr="${cell.row}"/><hp:cellSpan colSpan="${cell.colspan}" rowSpan="${cell.rowspan}"/>`;
-        xml += `<hp:cellSz width="${w}" height="${rowH * cell.rowspan}"/><hp:cellMargin left="${pad}" right="${pad}" top="141" bottom="141"/></hp:tc>`;
+        xml += `<hp:cellSz width="${w}" height="${spanH(cell.row, cell.rowspan)}"/><hp:cellMargin left="${pad}" right="${pad}" top="141" bottom="141"/></hp:tc>`;
       }
       xml += '</hp:tr>';
     }

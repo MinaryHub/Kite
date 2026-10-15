@@ -803,9 +803,13 @@ class DocxReader {
     const cells: Cell[] = [];
     const origin = new Map<number, Cell>();
     let rowIdx = 0;
+    const rowH: number[] = [];
     for (const tr of kids(tbl, 'tr')) {
       let col = 0;
       const trPr = kid(tr, 'trPr');
+      const trH = kid(trPr, 'trHeight');
+      // 정확한 높이(exact)와 최소 높이(atLeast) 모두 최소 높이로 쓴다
+      if (trH && attr(trH, 'hRule') !== 'auto') rowH[rowIdx] = parseFloat(attr(trH, 'val') || '0') / 15 || 0;
       const gridBefore = parseInt(attr(kid(trPr, 'gridBefore'), 'val') || '0', 10);
       col += gridBefore;
       for (const tc of kids(tr).filter((e) => localName(e) === 'tc' || localName(e) === 'sdt')) {
@@ -862,7 +866,7 @@ class DocxReader {
       rowIdx++;
     }
     // 그리드 기반 열 너비를 우선 사용
-    const t = assembleTable(cells, rowIdx);
+    const t = assembleTable(cells, rowIdx, 0, 0, rowH);
     if (grid.length && grid.every((g) => g > 0)) {
       for (const c of cells) c.node.attrs!.colwidth = grid.slice(c.col, c.col + c.cs);
     }

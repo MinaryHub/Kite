@@ -623,9 +623,10 @@ class BodyWriter {
     const scale = Math.min(1, this.bodyW / pxToHwp(totalPx));
     const colW = t.colWidthsPx.map((x) => Math.round(pxToHwp(x) * scale));
     const tableW = colW.reduce((a, b) => a + b, 0);
-    const rowH = 1000;
+    const rowHs = Array.from({ length: t.rows }, (_, i) => (t.rowHeightsPx?.[i] ? Math.max(1000, pxToHwp(t.rowHeightsPx[i]!) + 282) : 1000));
+    const spanH = (r: number, n: number) => rowHs.slice(r, r + n).reduce((a, b) => a + b, 0);
     const pad = pxToHwp(t.cellPadPx);
-    w.rec(TAG.CTRL_HEADER, lv, new Buf().u32(ctrlId('tbl ')).u32(0x082a2210).i32(0).i32(0).u32(tableW).u32(rowH * t.rows).i32(0).u16(283).u16(283).u16(283).u16(283).u32(inst()).u32(0).u16(0).out());
+    w.rec(TAG.CTRL_HEADER, lv, new Buf().u32(ctrlId('tbl ')).u32(0x082a2210).i32(0).i32(0).u32(tableW).u32(spanH(0, t.rows)).i32(0).u16(283).u16(283).u16(283).u16(283).u32(inst()).u32(0).u16(0).out());
     const tb = new Buf().u32(0x04000006).u16(t.rows).u16(t.cols).u16(0).u16(pad).u16(pad).u16(141).u16(141);
     for (const row of t.cells) tb.u16(row.length);
     tb.u16(3).u16(0);
@@ -649,7 +650,7 @@ class BodyWriter {
             .u16(cell.colspan)
             .u16(cell.rowspan)
             .u32(cw)
-            .u32(rowH * cell.rowspan)
+            .u32(spanH(cell.row, cell.rowspan))
             .u16(pad)
             .u16(pad)
             .u16(141)
