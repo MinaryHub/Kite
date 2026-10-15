@@ -66,9 +66,19 @@ const lsSet = (k: string, v: string) => {
   }
 };
 
-function renderMarkdown(md: string): string {
+// 응답 속 외부 그림은 표시만으로 주소(=문서 내용)가 전송될 수 있으므로 제거한다.
+// (문서에 숨겨진 지시로 조작된 응답이 데이터를 빼내는 경로 차단)
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  const el = node as Element;
+  if (el.tagName === 'IMG') {
+    const src = el.getAttribute('src') || '';
+    if (!/^data:image\//i.test(src)) el.remove();
+  }
+});
+
+export function renderMarkdown(md: string): string {
   const html = marked.parse(md, { gfm: true, breaks: true, async: false }) as string;
-  return DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+  return DOMPurify.sanitize(html, { USE_PROFILES: { html: true }, FORBID_TAGS: ['style', 'form', 'iframe', 'object', 'embed', 'video', 'audio', 'source', 'link', 'meta'] });
 }
 
 /** 현재 문서 또는 선택 영역의 내용 (Markdown) */
@@ -193,7 +203,8 @@ export function AiPanel() {
   const insert = (md: string, replace: boolean) => {
     const tab = app.active;
     if (!tab) return;
-    const json = htmlToJson(marked.parse(md, { gfm: true, async: false }) as string);
+    // 화면 표시와 같은 정리(외부 그림 제거)를 거친 뒤 문서에 넣는다
+    const json = htmlToJson(renderMarkdown(md));
     let content = json.content || [];
     // 한 문단이면 글자만 넣어 현재 문단 서식을 유지
     if (content.length === 1 && content[0].type === 'paragraph') content = content[0].content || [];
@@ -294,7 +305,12 @@ export function AiPanel() {
           if (a) {
             e.preventDefault();
             const href = a.getAttribute('href') || '';
-            if (/^https?:/.test(href)) platform.openExternal(href);
+            // 링크 주소에 문서 내용이 실려 나갈 수 있으므로 전체 주소를 보여 주고 확인받는다
+            if (/^https?:/.test(href) && window.confirm(`AI 응답 속 링크를 외부 브라우저로 엽니다.
+
+${href.slice(0, 500)}
+
+주소를 확인한 뒤 여세요. 계속할까요?`)) platform.openExternal(href);
           }
         }}
       >
