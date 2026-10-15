@@ -23,6 +23,7 @@ import {
   textNode,
   twipToMm,
   assertZipBudget,
+  readZipEntry,
 } from '../common';
 import { assembleTable } from '../hwp/reader';
 
@@ -139,7 +140,7 @@ class DocxReader {
 
   async text(path: string): Promise<string | null> {
     const f = this.zip.file(path);
-    return f ? f.async('string') : null;
+    return f ? readZipEntry(f, 'string') : null;
   }
 
   async loadRels(path: string): Promise<Map<string, { target: string; type: string; external: boolean }>> {
@@ -244,7 +245,7 @@ class DocxReader {
       if (!f) continue;
       const ext = path.split('.').pop() || '';
       const mime = mimeFromExt(ext);
-      this.images.set(id, isBrowserImage(mime) ? bytesToDataUrl(await f.async('uint8array'), mime) : placeholderImage(`그림(${ext.toUpperCase()})`));
+      this.images.set(id, isBrowserImage(mime) ? bytesToDataUrl(await readZipEntry(f, 'uint8array'), mime) : placeholderImage(`그림(${ext.toUpperCase()})`));
     }
   }
 
@@ -998,12 +999,12 @@ export async function readDocx(data: Uint8Array): Promise<LoadedDoc> {
   const zip = await JSZip.loadAsync(data);
   assertZipBudget(zip);
   let docPath = 'word/document.xml';
-  const rootRels = await zip.file('_rels/.rels')?.async('string');
+  const rootRels = await readZipEntry(zip.file('_rels/.rels'), 'string');
   if (rootRels) {
     const r = descendants(parseXml(rootRels), 'Relationship').find((x) => /officeDocument$/.test(attr(x, 'Type') || ''));
     if (r) docPath = (attr(r, 'Target') || docPath).replace(/^\//, '');
   }
-  const xml = await zip.file(docPath)?.async('string');
+  const xml = await readZipEntry(zip.file(docPath), 'string');
   if (!xml) throw new Error('DOCX 본문(document.xml)을 찾을 수 없습니다.');
   const reader = new DocxReader(zip);
   await reader.init();
@@ -1013,7 +1014,7 @@ export async function readDocx(data: Uint8Array): Promise<LoadedDoc> {
   const sectPr = body ? kid(body, 'sectPr') : null;
   await reader.applySection(sectPr || (body ? descendants(body, 'sectPr').pop() || null : null));
   const meta: DocMeta = {};
-  const core = await zip.file('docProps/core.xml')?.async('string');
+  const core = await readZipEntry(zip.file('docProps/core.xml'), 'string');
   if (core) {
     const c = parseXml(core);
     meta.title = descendant(c, 'title')?.textContent || undefined;

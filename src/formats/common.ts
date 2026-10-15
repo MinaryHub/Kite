@@ -1,3 +1,4 @@
+import type { JSZipObject } from 'jszip';
 import type { DocSettings } from '../types';
 
 export interface JMark {
@@ -133,6 +134,56 @@ export function safeIsoDate(v: unknown, fallback: string): string {
 export const MAX_IMPORT_BYTES = 300 * 1024 * 1024;
 /** 압축 파일(HWPX/DOCX) 안의 전체 풀린 크기 상한 */
 export const MAX_ZIP_UNCOMPRESSED = 600 * 1024 * 1024;
+
+/** 항목 하나의 풀린 크기 상한 */
+export const MAX_ZIP_ENTRY = 256 * 1024 * 1024;
+
+/**
+ * 압축 항목을 풀면서 실제 바이트 수를 센다. 머리에 적힌 크기는 조작할 수 있으므로
+ * (assertZipBudget 은 빠른 1차 검사일 뿐) 푸는 도중 상한을 넘으면 즉시 중단한다.
+ */
+export function readZipEntry(f: JSZipObject, type: 'string'): Promise<string>;
+export function readZipEntry(f: JSZipObject, type: 'uint8array'): Promise<Uint8Array>;
+export function readZipEntry(f: JSZipObject | null | undefined, type: 'string'): Promise<string | null>;
+export function readZipEntry(f: JSZipObject | null | undefined, type: 'uint8array'): Promise<Uint8Array | null>;
+export function readZipEntry(f: JSZipObject | null | undefined, type: 'string' | 'uint8array'): Promise<string | Uint8Array | null> {
+  if (!f) return Promise.resolve(null);
+  return new Promise((resolve, reject) => {
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    let done = false;
+    // internalStream 은 jszip 의 공개 구현이지만 타입 정의에는 없다
+    const stream = (f as any).internalStream('uint8array') as { on: (ev: string, cb: (...a: any[]) => void) => void; pause: () => void; resume: () => void };
+    stream.on('data', (chunk: Uint8Array) => {
+      if (done) return;
+      total += chunk.length;
+      if (total > MAX_ZIP_ENTRY) {
+        done = true;
+        stream.pause();
+        reject(new Error('문서 안의 압축 데이터가 너무 큽니다.'));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    stream.on('error', (e: unknown) => {
+      if (done) return;
+      done = true;
+      reject(e);
+    });
+    stream.on('end', () => {
+      if (done) return;
+      done = true;
+      const out = new Uint8Array(total);
+      let off = 0;
+      for (const c of chunks) {
+        out.set(c, off);
+        off += c.length;
+      }
+      resolve(type === 'string' ? new TextDecoder('utf-8').decode(out) : out);
+    });
+    stream.resume();
+  });
+}
 
 /** 압축 폭탄 방어: 풀린 크기 합이 상한을 넘으면 거부 */
 export function assertZipBudget(zip: { files: Record<string, any> }) {

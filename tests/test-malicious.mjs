@@ -59,6 +59,17 @@ const timed = async (fn) => {
   check('docx zip bomb rejected', !!r.err && /너무 큽니다/.test(String(r.err?.message)), `${r.ms}ms ${(data.length / 1024) | 0}KB → ${r.err?.message || 'accepted!'}`);
 }
 
+// 3b) 머리 정보로는 걸리지 않는 크기(300MB)의 본문 XML: 푸는 도중 항목 상한(256MB)에서 끊겨야 한다
+{
+  const zip = await JSZip.loadAsync(readSample('f.docx'));
+  let xml = await zip.file('word/document.xml').async('string');
+  xml = xml.replace('<w:body>', '<w:body>' + ' '.repeat(300 * 1024 * 1024));
+  zip.file('word/document.xml', xml, { compression: 'DEFLATE', compressionOptions: { level: 6 } });
+  const data = new Uint8Array(await zip.generateAsync({ type: 'uint8array' }));
+  const r = await timed(() => m.readDocx(data));
+  check('docx oversized entry stopped while inflating', !!r.err && /너무 큽니다/.test(String(r.err?.message)), `${r.ms}ms ${(data.length / 1024) | 0}KB → ${r.err?.message || 'accepted!'}`);
+}
+
 // 4) 색 속성 주입이 XML 로 새지 않는지
 {
   const { defaultSettings } = await load('src/formats/common.ts');

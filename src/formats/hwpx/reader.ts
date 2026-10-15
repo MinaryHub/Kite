@@ -32,6 +32,7 @@ import {
   type BorderSide,
   applyNumFormat,
   assertZipBudget,
+  readZipEntry,
 } from '../common';
 
 // ---------------- 헤더(스타일 정의) ----------------
@@ -696,7 +697,7 @@ async function zipText(zip: JSZip, path: string): Promise<string | null> {
     const name = Object.keys(zip.files).find((n) => n.toLowerCase() === lower);
     if (name) f = zip.file(name);
   }
-  return f ? f.async('string') : null;
+  return f ? readZipEntry(f, 'string') : null;
 }
 
 export async function readHwpx(data: Uint8Array): Promise<LoadedDoc> {
@@ -739,7 +740,7 @@ export async function readHwpx(data: Uint8Array): Promise<LoadedDoc> {
     if (!f) continue;
     const ext = path.split('.').pop() || '';
     const mime = it.type && it.type.startsWith('image/') && it.type !== 'image/jpg' ? it.type : mimeFromExt(ext);
-    if (isBrowserImage(mime)) images.set(id, bytesToDataUrl(await f.async('uint8array'), mime));
+    if (isBrowserImage(mime)) images.set(id, bytesToDataUrl(await readZipEntry(f, 'uint8array'), mime));
     else images.set(id, placeholderImage(`그림(${ext.toUpperCase()})`));
   }
 

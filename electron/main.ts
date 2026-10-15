@@ -33,9 +33,45 @@ function filesFromArgv(argv: string[]): string[] {
 // 열기/저장 대화상자 결과, 실행 인자, 최근 문서 목록, 자동 저장에 기록된 문서 경로.
 const allowedPaths = new Set<string>();
 const pathKey = (p: string) => path.resolve(p).toLowerCase();
-function allowPath(p: string) {
-  if (isLocalAbsolute(p)) allowedPaths.add(pathKey(p));
+/**
+ * 주 프로세스가 허용했던 경로의 영구 목록 (userData/known-paths.json).
+ * 자동 저장 파일은 렌더러가 내용을 쓰므로, 거기 적힌 경로는 이 목록에 있을 때만 다시 허용한다.
+ */
+let knownPaths: Set<string> | null = null;
+const knownPathsFile = () => path.join(app.getPath('userData'), 'known-paths.json');
+function loadKnownPaths(): Set<string> {
+  if (knownPaths) return knownPaths;
+  try {
+    const raw = JSON.parse(fs.readFileSync(knownPathsFile(), 'utf8'));
+    knownPaths = new Set(Array.isArray(raw) ? raw.filter((x: unknown) => typeof x === 'string').slice(-500) : []);
+  } catch {
+    knownPaths = new Set();
+  }
+  return knownPaths;
 }
+let knownSaveTimer: NodeJS.Timeout | null = null;
+function rememberPath(key: string) {
+  const set = loadKnownPaths();
+  if (set.has(key)) return;
+  set.add(key);
+  if (knownSaveTimer) clearTimeout(knownSaveTimer);
+  knownSaveTimer = setTimeout(() => {
+    try {
+      fs.mkdirSync(path.dirname(knownPathsFile()), { recursive: true });
+      fs.writeFileSync(knownPathsFile(), JSON.stringify([...set].slice(-500)));
+    } catch {
+      /* 무시 */
+    }
+  }, 300);
+}
+function allowPath(p: string) {
+  if (!isLocalAbsolute(p)) return;
+  const key = pathKey(p);
+  allowedPaths.add(key);
+  rememberPath(key);
+}
+/** 저장할 수 있는 문서 확장자 */
+const SAVE_EXT = /\.(hwp|hwpx|docx|md|markdown|txt|html?|pdf)$/i;
 function assertAllowed(p: unknown, what: string): string {
   if (!isLocalAbsolute(p) || !allowedPaths.has(pathKey(p))) throw new Error(`${what}: 허용되지 않은 경로입니다.`);
   return p;
@@ -279,6 +315,7 @@ ipcMain.handle('file:save-dialog', async (_e, defaultPath: string, filters) => {
 const MAX_WRITE = 512 * 1024 * 1024;
 ipcMain.handle('file:write', async (_e, p: string, data: Uint8Array) => {
   const target = assertAllowed(p, '저장');
+  if (!SAVE_EXT.test(target)) throw new Error('저장: 지원하지 않는 파일 형식입니다.');
   if (!(data instanceof Uint8Array) || data.byteLength > MAX_WRITE) throw new Error('저장할 내용이 올바르지 않습니다.');
   // 안전한 저장: 임시 파일에 쓴 뒤 교체. 실패하면 임시 파일을 남기지 않는다
   const tmp = target + '.kite-tmp';
@@ -407,7 +444,7 @@ ipcMain.handle('autosave:list', async () => {
       // 복구된 문서를 원래 자리에 다시 저장할 수 있도록 기록된 경로를 허용한다
       try {
         const docPath = JSON.parse(json)?.path;
-        if (isLocalAbsolute(docPath)) allowPath(docPath);
+        if (isLocalAbsolute(docPath) && DOC_EXT.test(docPath) && loadKnownPaths().has(pathKey(docPath))) allowedPaths.add(pathKey(docPath));
       } catch {
         /* 무시 */
       }
@@ -424,7 +461,10 @@ ipcMain.handle('print:pdf', async (_e, opts: { widthMm: number; heightMm: number
   if (!mainWindow) return null;
   // 다른 이름으로 저장에서 이미 고른 경로가 있으면 대화상자를 다시 띄우지 않는다
   let filePath: string;
-  if (opts.path) filePath = assertAllowed(opts.path, 'PDF 저장');
+  if (opts.path) {
+    filePath = assertAllowed(opts.path, 'PDF 저장');
+    if (!/\.pdf$/i.test(filePath)) throw new Error('PDF 저장: 확장자가 .pdf 가 아닙니다.');
+  }
   else {
     const target = await dialog.showSaveDialog(mainWindow, {
       title: 'PDF로 저장',
