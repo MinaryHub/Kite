@@ -12,6 +12,8 @@ const devCsp = () => ({
 
 export default defineConfig({
   base: './',
+  // 정보 창에 보여 줄 빌드 시각
+  define: { __BUILD_TIME__: JSON.stringify(new Date().toISOString()) },
   plugins: [react(), devCsp()],
   server: { port: 5183, strictPort: true },
   build: { outDir: 'dist', emptyOutDir: true, chunkSizeWarningLimit: 4000 },

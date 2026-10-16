@@ -500,6 +500,14 @@ export function StyleDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** 빌드 시각 (vite define) → 2026-10-16 09:30 */
+function buildDate(): string {
+  const d = new Date(__BUILD_TIME__);
+  if (isNaN(d.getTime())) return '';
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 export function AboutDialog({ onClose }: { onClose: () => void }) {
   const [version, setVersion] = useState('');
   useEffect(() => {
@@ -510,7 +518,10 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
       <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
         <img src="./icon.svg" alt="" style={{ width: 56, height: 56 }} />
         <div>
-          <div style={{ fontSize: 16, fontWeight: 700 }}>Kite 워드프로세서 {version || ''}</div>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>Kite 워드프로세서</div>
+          <div className="unit">
+            버전 {version || '개발판'} · {buildDate()} 빌드
+          </div>
           <div className="unit">HWP · HWPX · DOCX · DOC · PDF · MD 문서 편집기</div>
         </div>
       </div>
