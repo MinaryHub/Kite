@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { initMcpHost, isMcpBridge, runMcpBridge } from './mcp';
+import { listPrivateFonts, readPrivateFont } from './fonts';
 
 /** AI 앱이 실행한 MCP 다리(Kite.exe --mcp): 창 없이 표준 입출력으로만 동작한다 */
 const MCP_BRIDGE = isMcpBridge();
@@ -181,7 +182,7 @@ function createWindow() {
       setTimeout(async () => {
         try {
           const r = await mainWindow!.webContents.executeJavaScript(
-            `(async () => { const d = [...document.querySelectorAll('.doc-tab .dt-title')].map(e => e.textContent); const ai = window.kite ? await window.kite.aiKeyStatus() : null; let readDenied = false; try { await window.kite.readFile('C:\\Windows\\win.ini'); } catch { readDenied = true; } let writeDenied = false; try { await window.kite.writeFile('C:\\Windows\\Temp\\kite-smoke-x.txt', new Uint8Array(1)); } catch { writeDenied = true; } return JSON.stringify({ tabs: d, pages: document.querySelectorAll('.workspace:not(.hidden-doc) .paper').length, title: document.title, hasApi: !!window.kite, ai, readDenied, writeDenied }); })()`,
+            `(async () => { const d = [...document.querySelectorAll('.doc-tab .dt-title')].map(e => e.textContent); const ai = window.kite ? await window.kite.aiKeyStatus() : null; let readDenied = false; try { await window.kite.readFile('C:\\Windows\\win.ini'); } catch { readDenied = true; } let writeDenied = false; try { await window.kite.writeFile('C:\\Windows\\Temp\\kite-smoke-x.txt', new Uint8Array(1)); } catch { writeDenied = true; } const fonts = [...document.fonts].map(f => f.family).filter(f => f !== 'kite-sym'); const fontLog = window.__kiteFontLog || null; return JSON.stringify({ tabs: d, pages: document.querySelectorAll('.workspace:not(.hidden-doc) .paper').length, title: document.title, hasApi: !!window.kite, ai, readDenied, writeDenied, fonts, fontLog }); })()`,
           );
           fs.writeFileSync(process.env.KITE_SMOKE!, 'SMOKE ' + r);
         } catch (e) {
@@ -591,6 +592,13 @@ ipcMain.handle('fonts:list', async () => {
         .filter(Boolean)
     : [];
   return fontCache;
+});
+
+// 한컴오피스가 자기 폴더에만 두는 글꼴 (HY헤드라인M 등): 이름 목록과 파일 바이트
+ipcMain.handle('fonts:private-list', async () => listPrivateFonts().map((f) => f.names));
+ipcMain.handle('fonts:private-read', async (_e, name: unknown) => {
+  if (typeof name !== 'string') return null;
+  return readPrivateFont(name);
 });
 
 // ---------------- 구형 DOC 변환 ----------------

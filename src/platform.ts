@@ -170,6 +170,18 @@ export const platform = {
     return out;
   },
 
+  /** 한컴오피스 폴더에만 있는 글꼴 이름 묶음들 (브라우저에서는 없음) */
+  async listPrivateFonts(): Promise<string[][]> {
+    if (api?.listPrivateFonts) return api.listPrivateFonts();
+    return [];
+  },
+
+  /** 한컴오피스 폴더의 글꼴 파일 바이트 */
+  async readPrivateFont(name: string): Promise<{ names: string[]; data: Uint8Array } | null> {
+    if (api?.readPrivateFont) return api.readPrivateFont(name);
+    return null;
+  },
+
   async listFonts(): Promise<string[]> {
     if (api) return api.listFonts();
     try {

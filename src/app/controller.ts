@@ -5,7 +5,7 @@ import { baseName, splitExt, MAX_IMPORT_BYTES } from '../formats/common';
 import type { SaveFormatId } from '../types';
 import { withPrintRoot } from '../print';
 import { viewState } from '../editor/viewState';
-import { KOREAN_FONTS, LATIN_FONTS } from '../fonts';
+import { KOREAN_FONTS, LATIN_FONTS, installedFonts, privateFontNames, ensurePrivateFonts, collectFontNames } from '../fonts';
 
 export interface DialogState {
   type: string;
@@ -148,7 +148,13 @@ export class AppController {
     this.recent = await platform.getRecent();
     platform.listFonts().then((f) => {
       this.systemFonts = f;
+      f.forEach((n) => installedFonts.add(n));
       this.emit();
+      // 한컴오피스 폴더의 글꼴 이름을 알아 두고, 이미 열린 문서에 필요한 것은 올린다
+      platform.listPrivateFonts().then((groups) => {
+        for (const g of groups) for (const n of g) privateFontNames.set(n, g);
+        for (const d of this.docs) this.loadDocFonts(d);
+      });
     });
     platform.onOpenFiles((files) => files.forEach((f) => this.openPath(f)));
     platform.onRequestClose(() => this.requestQuit());
@@ -213,8 +219,16 @@ export class AppController {
   }
 
   // ---------------- 문서 ----------------
+  /** 문서가 쓰는 글꼴 가운데 한컴 폴더에만 있는 것을 올린다 */
+  private loadDocFonts(tab: DocTab) {
+    if (!privateFontNames.size) return;
+    const names = collectFontNames(tab.editor.getJSON());
+    void ensurePrivateFonts(names, (n) => platform.readPrivateFont(n));
+  }
+
   private addDoc(tab: DocTab) {
     this.docs = [...this.docs, tab];
+    this.loadDocFonts(tab);
     this.activeId = tab.id;
     this.docUnsubs.set(
       tab.id,

@@ -4,7 +4,7 @@ import Underline from '@tiptap/extension-underline';
 import TextStyle from '@tiptap/extension-text-style';
 import Color from '@tiptap/extension-color';
 import FontFamily from '@tiptap/extension-font-family';
-import { fontStack } from '../fonts';
+import { fontStack, fontWeightFallback } from '../fonts';
 import Highlight from '@tiptap/extension-highlight';
 import { normColor } from '../formats/common';
 import Subscript from '@tiptap/extension-subscript';
@@ -56,7 +56,11 @@ export function getExtensions(): AnyExtension[] {
               fontFamily: {
                 default: null,
                 parseHTML: (el: HTMLElement) => el.style.fontFamily?.split(',')[0].replace(/['"]/g, '').trim() || null,
-                renderHTML: (a: Record<string, any>) => (a.fontFamily ? { style: `font-family: ${fontStack(a.fontFamily)}` } : {}),
+                renderHTML: (a: Record<string, any>) => {
+                  if (!a.fontFamily) return {};
+                  const w = fontWeightFallback(String(a.fontFamily));
+                  return { style: `font-family: ${fontStack(a.fontFamily)}${w ? `; font-weight: ${w}` : ''}` };
+                },
               },
             },
           },

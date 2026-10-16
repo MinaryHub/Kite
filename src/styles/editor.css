@@ -1,3 +1,10 @@
+/* 가운뎃점 등 몇몇 기호는 문서 글꼴과 상관없이 반각으로 (한글의 '기호' 글꼴 역할). fonts.ts 의 fontStack 이 맨 앞에 둔다 */
+@font-face {
+  font-family: 'kite-sym';
+  src: local('함초롬바탕'), local('HCR Batang'), local('Times New Roman');
+  unicode-range: U+00B7, U+2027, U+2219, U+22C5;
+}
+
 /* ===== 문서 본문 (한글 기본값: 함초롬바탕 10pt, 줄 간격 160%, 양쪽 정렬) ===== */
 @counter-style k-circled {
   system: fixed;
