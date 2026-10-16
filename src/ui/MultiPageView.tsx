@@ -74,8 +74,9 @@ export function MultiPageView({ tab }: { tab: DocTab }) {
   const updateRange = () => {
     const ws = wsRef.current;
     if (!ws) return;
-    const first = Math.max(0, Math.floor((ws.scrollTop - 16) / rowH) - 1);
-    const last = Math.ceil((ws.scrollTop + ws.clientHeight) / rowH) + 1;
+    // 보이는 줄과 그 아래 한 줄만 (큰 문서는 쪽 사본 하나가 수십 ms 걸린다)
+    const first = Math.max(0, Math.floor((ws.scrollTop - 16) / rowH));
+    const last = Math.ceil((ws.scrollTop + ws.clientHeight - 16) / rowH);
     setRange((r) => (r[0] === first && r[1] === last ? r : [first, last]));
   };
   useEffect(updateRange, [rowH, cols, width]);
