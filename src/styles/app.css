@@ -1567,3 +1567,10 @@ input[type='number'] {
   padding: 8px 10px;
   line-height: 1.5;
 }
+
+/* 쪽 나누기 측정 중 위쪽 내용 높이가 잠깐 바뀌어도 브라우저가 스크롤을 옮기지 않게 */
+.workspace {
+  overflow-anchor: none;
+  /* 세로 스크롤바가 생길 때 본문 너비가 줄어 전체 쪽 나누기를 다시 하지 않도록 자리를 미리 둔다 */
+  scrollbar-gutter: stable;
+}

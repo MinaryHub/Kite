@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useApp, useEditorTick } from '../app/hooks';
 import { caretPage } from './PageView';
 import { runCommand } from '../app/commands';
@@ -7,6 +8,20 @@ export function StatusBar() {
   const tab = app.active;
   useEditorTick(tab?.editor);
   if (!app.view.statusbar) return null;
+  // 글자·단어 수는 문서 전체를 세므로(큰 문서에서 20ms) 입력마다 세지 않고 잠시 뒤에 한 번만 센다
+  const [counts, setCounts] = useState<{ chars: number; words: number; doc: unknown }>({ chars: 0, words: 0, doc: null });
+  useEffect(() => {
+    if (!tab) return;
+    const ed = tab.editor;
+    const d = ed.state.doc;
+    if (counts.doc === d) return;
+    const big = d.content.size > 50000;
+    const t = setTimeout(() => {
+      const cc = ed.storage.characterCount;
+      setCounts({ chars: cc?.characters() ?? 0, words: cc?.words() ?? 0, doc: d });
+    }, counts.doc == null ? 0 : big ? 700 : 150);
+    return () => clearTimeout(t);
+  });
   let page = 1;
   let pages = 1;
   let line = 1;
@@ -30,9 +45,8 @@ export function StatusBar() {
     } catch {
       /* 무시 */
     }
-    const cc = ed.storage.characterCount;
-    chars = cc?.characters() ?? 0;
-    words = cc?.words() ?? 0;
+    chars = counts.chars;
+    words = counts.words;
     overwrite = !!ed.storage.keyboardExtras?.overwrite;
     if (to > from) selChars = ed.state.doc.textBetween(from, to, '\n').length;
   }

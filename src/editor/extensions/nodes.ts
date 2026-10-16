@@ -7,7 +7,7 @@ import TableHeader from '@tiptap/extension-table-header';
 import TableRow from '@tiptap/extension-table-row';
 import Table, { TableView } from '@tiptap/extension-table';
 import type { Node as PMNode } from '@tiptap/pm/model';
-import { NodeSelection, Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
+import { NodeSelection, Plugin, PluginKey, TextSelection, type Transaction } from '@tiptap/pm/state';
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import { viewState } from '../viewState';
 import { normColor } from '../../formats/common';
@@ -113,7 +113,14 @@ export const KImage = Image.extend({
         layout(n.attrs.width, n.attrs.height, cropOf(n.attrs.crop));
       };
       apply(node);
-      img.addEventListener('load', () => window.dispatchEvent(new Event('kite:relayout')));
+      // 그림이 로드되면 그 블록의 높이만 달라지므로 위치를 알려 그 부분만 다시 재게 한다
+      img.addEventListener('load', () => {
+        // 폭·높이가 모두 정해진 그림(HWP 에서 가져온 그림 전부)은 로드돼도 상자 크기가 그대로라 배치가 바뀌지 않는다
+        if (current.attrs.width && current.attrs.height) return;
+        // 이미 떨어져 나간 NodeView(getPos 가 undefined)의 로드는 배치에 영향이 없다
+        const p = typeof getPos === 'function' ? getPos() : undefined;
+        if (typeof p === 'number') window.dispatchEvent(new CustomEvent('kite:relayout', { detail: { pos: p } }));
+      });
 
       handle.addEventListener('mousedown', (e) => {
         e.preventDefault();
@@ -277,7 +284,8 @@ export const Footnote = Node.create({
           if (n.type.name !== 'footnote') return false;
           dom.title = n.attrs.text;
           dom.setAttribute('data-footnote', n.attrs.text);
-          window.dispatchEvent(new Event('kite:relayout'));
+          const p = typeof getPos === 'function' ? getPos() : undefined;
+          if (typeof p === 'number') window.dispatchEvent(new CustomEvent('kite:relayout', { detail: { pos: p } }));
           return true;
         },
         ignoreMutation: () => true,
@@ -542,9 +550,10 @@ export const KeyboardExtras = Extension.create({
 const NOWRAP_RE = /^[\x21-\x7e]{1,10}$/;
 const cellNoWrapKey = new PluginKey<DecorationSet>('cellNoWrap');
 
-function noWrapDecos(doc: PMNode): DecorationSet {
+/** from~to 범위(최상위 블록 경계로 넓힌 것)의 셀 문단만 검사한다 */
+function noWrapDecosIn(doc: PMNode, from: number, to: number): Decoration[] {
   const decos: Decoration[] = [];
-  doc.descendants((node, pos, parent) => {
+  doc.nodesBetween(from, to, (node, pos, parent) => {
     if (node.type.name === 'table' || node.type.name === 'tableRow' || node.type.name === 'tableCell' || node.type.name === 'tableHeader') return true;
     if (node.isTextblock && parent && (parent.type.name === 'tableCell' || parent.type.name === 'tableHeader')) {
       if (NOWRAP_RE.test(node.textContent.trim())) decos.push(Decoration.node(pos, pos + node.nodeSize, { class: 'k-nowrap' }));
@@ -552,7 +561,48 @@ function noWrapDecos(doc: PMNode): DecorationSet {
     }
     return node.type.name !== 'paragraph';
   });
-  return DecorationSet.create(doc, decos);
+  return decos;
+}
+
+function noWrapDecos(doc: PMNode): DecorationSet {
+  return DecorationSet.create(doc, noWrapDecosIn(doc, 0, doc.content.size));
+}
+
+/** 최상위 블록 경계로 넓힌 범위 */
+function blockSpan(doc: PMNode, from: number, to: number): [number, number] {
+  const $f = doc.resolve(Math.max(0, Math.min(from, doc.content.size)));
+  const $t = doc.resolve(Math.max(0, Math.min(to, doc.content.size)));
+  return [$f.depth ? $f.before(1) : $f.pos, $t.depth ? $t.after(1) : $t.pos];
+}
+
+/**
+ * 문서가 바뀐 범위(바뀐 최상위 블록)만 다시 계산한다.
+ * 큰 문서(표 수백 개)에서 글자 하나 칠 때마다 전체를 훑으면 수십~백 ms 가 걸렸다.
+ */
+function noWrapDecosIncremental(tr: Transaction, old: DecorationSet): DecorationSet {
+  const doc = tr.doc;
+  let set = old.map(tr.mapping, doc);
+  const spans: [number, number][] = [];
+  tr.mapping.maps.forEach((map, i) => {
+    const rest = tr.mapping.slice(i + 1);
+    map.forEach((_os, _oe, ns, ne) => spans.push(blockSpan(doc, rest.map(ns, -1), rest.map(ne, 1))));
+  });
+  // 겹치는 범위 합치기
+  spans.sort((a, b) => a[0] - b[0]);
+  const merged: [number, number][] = [];
+  for (const sp of spans) {
+    const last = merged[merged.length - 1];
+    if (last && sp[0] <= last[1]) last[1] = Math.max(last[1], sp[1]);
+    else merged.push([...sp] as [number, number]);
+  }
+  for (const [from, to] of merged) {
+    if (to <= from) continue;
+    const stale = set.find(from, to);
+    if (stale.length) set = set.remove(stale);
+    const fresh = noWrapDecosIn(doc, from, to);
+    if (fresh.length) set = set.add(doc, fresh);
+  }
+  return set;
 }
 
 export const CellNoWrap = Extension.create({
@@ -563,7 +613,7 @@ export const CellNoWrap = Extension.create({
         key: cellNoWrapKey,
         state: {
           init: (_c, state) => noWrapDecos(state.doc),
-          apply: (tr, old) => (tr.docChanged ? noWrapDecos(tr.doc) : old),
+          apply: (tr, old) => (tr.docChanged ? noWrapDecosIncremental(tr, old) : old),
         },
         props: {
           decorations(state) {

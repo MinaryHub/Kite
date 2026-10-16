@@ -329,7 +329,10 @@
   pointer-events: none;
   user-select: none;
 }
-.kdoc-content.pg-measuring .pg-spacer {
+/* 쪽 나누기 측정: 루트(전체) 또는 블록(증분)에 pg-measuring 이 붙으면 그 안의 공간을 숨긴다 */
+.kdoc-content.pg-measuring .pg-spacer,
+.kdoc-content .pg-measuring .pg-spacer,
+.kdoc-content .pg-spacer.pg-measuring {
   display: none !important;
 }
 .kdoc-content tr.pg-push-row > td,
@@ -346,8 +349,11 @@
   background-image: none;
 }
 .kdoc-content.pg-measuring tr.pg-push-row > td,
-.kdoc-content.pg-measuring tr.pg-push-row > th {
+.kdoc-content.pg-measuring tr.pg-push-row > th,
+.kdoc-content .pg-measuring tr.pg-push-row > td,
+.kdoc-content .pg-measuring tr.pg-push-row > th {
   padding-top: 0.5mm;
+  background-image: none;
 }
 
 /* ----- 각주 ----- */

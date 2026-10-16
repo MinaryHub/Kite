@@ -1,5 +1,6 @@
 import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Mapping } from '@tiptap/pm/transform';
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { viewState } from '../viewState';
@@ -21,6 +22,12 @@ export interface PageGeometry {
   contentHeight: number;
   /** 본문 폭(px) */
   contentWidth: number;
+}
+
+function sameGeometry(a: PageGeometry | null, b: PageGeometry | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.pageHeight === b.pageHeight && a.gap === b.gap && a.contentHeight === b.contentHeight && a.contentWidth === b.contentWidth;
 }
 
 export interface PageBreakInfo {
@@ -63,6 +70,9 @@ export function estimateFootnoteHeight(text: string, width: number): number {
 
 function buildDecos(doc: PMNode, breaks: PageBreakInfo[]): DecorationSet {
   const decos: Decoration[] = [];
+  // 위젯 key 에 위치를 넣으면 한 글자만 쳐도 뒤쪽 모든 나누기의 위치가 밀려 수백 개 위젯이 다시 그려진다.
+  // 몇 번째 나누기인지와 높이만 넣어, 같은 자리의 같은 높이면 ProseMirror 가 기존 DOM 을 그대로 쓰게 한다.
+  let i = 0;
   for (const b of breaks) {
     if (b.kind === 'row') {
       const node = doc.nodeAt(b.pos);
@@ -81,7 +91,7 @@ function buildDecos(doc: PMNode, breaks: PageBreakInfo[]): DecorationSet {
           el.contentEditable = 'false';
           return el;
         },
-        { side: -1, key: `pg-${b.kind}-${b.pos}-${b.height}`, ignoreSelection: true, marks: [] },
+        { side: -1, key: `pg-${b.kind}-${i++}-${b.height}`, ignoreSelection: true, marks: [] },
       ),
     );
   }
@@ -103,12 +113,62 @@ interface Line {
   bottom: number;
 }
 
-function computeLayout(view: EditorView, g: PageGeometry): { breaks: PageBreakInfo[]; result: LayoutResult } | null {
+/** 최상위 블록 하나를 배치하기 직전의 상태 (증분 배치용) */
+interface Snap {
+  /** 블록의 자연 배치 위쪽 (문서 기준 px, 공간 제외) */
+  top: number;
+  page: number;
+  shift: number;
+  fnUsed: number;
+  forceNext: boolean;
+  lastBottom: number;
+  nBreaks: number;
+  nFn: number;
+  nStarts: number;
+}
+
+export interface LayoutCache {
+  doc: PMNode;
+  snaps: Snap[];
+  breaksLen: number;
+  footnotes: FootnoteInfo[];
+  pageStarts: number[];
+  pageCount: number;
+  lastBottom: number;
+}
+
+/** 지난 배치 뒤로 문서가 바뀐 범위 (현재 문서 좌표) 와 그동안의 위치 변환 */
+export interface DirtyRange {
+  from: number;
+  to: number;
+  mapping: Mapping;
+}
+
+/**
+ * @param cache 지난 배치 결과. dirty 와 함께 주면 바뀐 최상위 블록부터만 다시 재고,
+ *              그 뒤 블록의 절대 위치·쪽 상태가 지난번과 같아지는 순간 멈추고 지난 결과를 이어 쓴다.
+ * @param curBreaks 플러그인 상태의 현재 나눔 목록 (지난 결과를 문서 변경에 맞춰 옮겨 둔 것)
+ */
+function computeLayout(
+  view: EditorView,
+  g: PageGeometry,
+  cache: LayoutCache | null = null,
+  dirty: DirtyRange | null = null,
+  curBreaks: PageBreakInfo[] = [],
+): { breaks: PageBreakInfo[]; result: LayoutResult; cache: LayoutCache; incremental: boolean } | null {
   const root = view.dom as HTMLElement;
   const s = viewState.zoom || 1;
-  const rootRect = root.getBoundingClientRect();
-  const rootTop = rootRect.top;
-  const rel = (y: number) => (y - rootTop) / s;
+  // 공간을 숨기면 스크롤이 조정되어 편집기 자체가 움직일 수 있으므로, 전환할 때마다 기준점을 다시 읽는다
+  let rootTop = root.getBoundingClientRect().top;
+  const refreshRootTop = () => {
+    rootTop = root.getBoundingClientRect().top;
+  };
+  const relRaw = (y: number) => (y - rootTop) / s;
+  // 증분 배치: 바뀐 블록들과 그 사이 스페이서만 자연 상태로 바꾸고(부분 숨김), 바뀐 첫 블록의 자연 위치는
+  // 지난 스냅샷에서 가져와 그 차이(offset)로 나머지를 환산한다. 문서 전체를 숨겼다 되돌리면
+  // 큰 문서에서 다시 배치하는 데만 100ms 넘게 걸렸다.
+  let offset = 0;
+  const rel = (y: number) => relRaw(y) - offset;
   const P = g.pageHeight + g.gap;
   const CH = g.contentHeight;
 
@@ -117,9 +177,50 @@ function computeLayout(view: EditorView, g: PageGeometry): { breaks: PageBreakIn
   let fnUsed = 0;
   let forceNext = false;
   let lastBottom = 0;
-  const breaks: PageBreakInfo[] = [];
-  const footnotes: FootnoteInfo[] = [];
-  const pageStarts: number[] = [0];
+  let breaks: PageBreakInfo[] = [];
+  let footnotes: FootnoteInfo[] = [];
+  let pageStarts: number[] = [0];
+  const doc = view.state.doc;
+  const clampPos = (p: number) => Math.max(0, Math.min(doc.content.size, p));
+
+  // ---- 증분 배치 준비 ----
+  // startIndex: 다시 재기 시작할 최상위 블록, resumeNew/resumePrev: 바뀐 범위 뒤의 첫 블록(현재/지난 문서)
+  let startIndex = 0;
+  let resumeNew = Infinity;
+  let resumePrev = Infinity;
+  let useCache = false;
+  if (cache && dirty && curBreaks.length === cache.breaksLen && cache.snaps.length === cache.doc.childCount) {
+    try {
+      const $f = doc.resolve(clampPos(dirty.from));
+      const $t = doc.resolve(clampPos(dirty.to));
+      const si = $f.index(0);
+      const rn = $t.depth === 0 ? $t.index(0) : $t.index(0) + 1;
+      const oldTo = dirty.mapping.invert().map(clampPos(dirty.to), 1);
+      const $ot = cache.doc.resolve(Math.max(0, Math.min(cache.doc.content.size, oldTo)));
+      const rp = $ot.depth === 0 ? $ot.index(0) : $ot.index(0) + 1;
+      // 바뀐 범위가 넓으면(되돌리기 여러 단계 등) 블록마다 전환하는 증분보다 전체가 싸다
+      if (rn - si > 60) return null;
+      // 바뀐 범위 앞뒤의 블록 수가 맞아야 지난 스냅샷과 대응한다
+      if (si < cache.snaps.length && rn >= si && rp >= si && cache.doc.childCount - rp === doc.childCount - rn) {
+        const snap = cache.snaps[si];
+        startIndex = si;
+        resumeNew = rn;
+        resumePrev = rp;
+        useCache = true;
+        page = snap.page;
+        shift = snap.shift;
+        fnUsed = snap.fnUsed;
+        forceNext = snap.forceNext;
+        lastBottom = snap.lastBottom;
+        breaks = curBreaks.slice(0, snap.nBreaks);
+        footnotes = cache.footnotes.slice(0, snap.nFn).map((f) => ({ ...f, pos: dirty.mapping.map(f.pos) }));
+        pageStarts = cache.pageStarts.slice(0, snap.nStarts).map((x) => dirty.mapping.map(x));
+        if (!pageStarts.length) pageStarts = [0];
+      }
+    } catch {
+      useCache = false;
+    }
+  }
 
   // 각주 번호 매기기 (문서 순서)
   const refEls = Array.from(root.querySelectorAll('sup.footnote-ref')) as HTMLElement[];
@@ -454,35 +555,119 @@ function computeLayout(view: EditorView, g: PageGeometry): { breaks: PageBreakIn
     pushFootnotes(fns);
   };
 
+  const handleChild = (child: PMNode, pos: number) => {
+    const name = child.type.name;
+    if (name === 'pageBreak') {
+      forceNext = true;
+      return;
+    }
+    if (child.isTextblock) handleTextblock(child, pos);
+    else if (name === 'table') handleTable(child, pos);
+    else if (CONTAINERS.has(name)) walk(child, pos + 1);
+    else handleOther(pos);
+  };
   const walk = (parent: PMNode, base: number) => {
-    parent.forEach((child, offset) => {
-      const pos = base + offset;
-      const name = child.type.name;
-      if (name === 'pageBreak') {
-        forceNext = true;
-        return;
-      }
-      if (child.isTextblock) handleTextblock(child, pos);
-      else if (name === 'table') handleTable(child, pos);
-      else if (CONTAINERS.has(name)) walk(child, pos + 1);
-      else handleOther(pos);
-    });
+    parent.forEach((child, offset) => handleChild(child, base + offset));
   };
 
-  walk(view.state.doc, 0);
+  // 최상위 블록을 돌며 블록마다 상태 스냅샷을 남긴다
+  const snaps: Snap[] = useCache ? cache!.snaps.slice(0, startIndex) : [];
+  let early: { j: number; pj: number; delta: number; dp: number } | null = null;
+  const toggled: Element[] = [];
+  /** 이 블록(과 바로 앞의 쪽 나누기 공간)을 자연 상태로 */
+  const naturalize = (el: HTMLElement) => {
+    for (let sib = el.previousElementSibling; sib && sib.classList.contains('pg-spacer'); sib = sib.previousElementSibling) {
+      sib.classList.add('pg-measuring');
+      toggled.push(sib);
+    }
+    el.classList.add('pg-measuring');
+    toggled.push(el);
+  };
+  // 측정용 클래스 전환을 ProseMirror 의 DOM 감시자가 보면 그 블록(큰 표면 수십 ms) 전체를 다시 읽으므로, 재는 동안은 감시를 멈춘다
+  const obs = (view as any).domObserver as { stop(): void; start(): void } | undefined;
+  obs?.stop();
+  if (!useCache) root.classList.add('pg-measuring');
+  refreshRootTop();
+  /** 증분인데 이만큼 지나도 지난 결과와 맞물리지 않으면 전체 배치가 더 싸다 */
+  const INCREMENTAL_LIMIT = 60;
+  let pos = 0;
+  try {
+  for (let j = 0; j < doc.childCount; j++) {
+    const child = doc.child(j);
+    if (j < startIndex) {
+      pos += child.nodeSize;
+      continue;
+    }
+    const el = view.nodeDOM(pos) as HTMLElement | null;
+    if (useCache && el instanceof HTMLElement) {
+      if (j >= resumeNew + INCREMENTAL_LIMIT) return null;
+      naturalize(el);
+      refreshRootTop();
+      // 바뀐 첫 블록: 자연 위치는 지난번과 같으므로 그 차이가 전체 offset
+      if (j === startIndex) offset = relRaw(el.getBoundingClientRect().top) - cache!.snaps[startIndex].top;
+    }
+    const top = el instanceof HTMLElement ? rel(el.getBoundingClientRect().top) : NaN;
+    if (useCache && j >= resumeNew && isFinite(top)) {
+      const pj = j - resumeNew + resumePrev;
+      const ps = cache!.snaps[pj];
+      if (ps && isFinite(ps.top)) {
+        const delta = top - ps.top;
+        const dp = page - ps.page;
+        // 이 블록의 쪽 안 위치와 각주 상태가 지난번과 같으면(쪽 번호는 dp 만큼 밀려도) 뒤는 모두 같다
+        if (Math.abs(shift + delta - (ps.shift + dp * P)) < 0.5 && Math.abs(fnUsed - ps.fnUsed) < 0.5 && forceNext === ps.forceNext) {
+          early = { j, pj, delta, dp };
+          break;
+        }
+      }
+    }
+    snaps[j] = { top, page, shift, fnUsed, forceNext, lastBottom, nBreaks: breaks.length, nFn: footnotes.length, nStarts: pageStarts.length };
+    handleChild(child, pos);
+    pos += child.nodeSize;
+  }
+  } finally {
+    if (!useCache) root.classList.remove('pg-measuring');
+    for (const el of toggled) el.classList.remove('pg-measuring');
+    obs?.start();
+  }
 
-  let pageCount = Math.max(page + 1, Math.floor(Math.max(0, lastBottom - 0.5) / P) + 1);
-  if (forceNext) pageCount = Math.max(pageCount, page + 2);
-  pageCount = Math.min(pageCount, MAX_PAGES);
-  while (pageStarts.length < pageCount) pageStarts.push(view.state.doc.content.size);
-  return { breaks, result: { pageCount, footnotes, pageStarts } };
+  let pageCount: number;
+  if (early) {
+    const { j, pj, delta, dp } = early;
+    const ps = cache!.snaps[pj];
+    // 지난 pageStarts 는 쪽 번호 순서이므로 현재 쪽까지 채운 뒤 이어 붙인다
+    while (pageStarts.length < page + 1 && pageStarts.length < MAX_PAGES) pageStarts.push(pos);
+    const dB = breaks.length - ps.nBreaks;
+    const dF = footnotes.length - ps.nFn;
+    const dS = pageStarts.length - ps.nStarts;
+    breaks = breaks.concat(curBreaks.slice(ps.nBreaks));
+    footnotes = footnotes.concat(cache!.footnotes.slice(ps.nFn).map((f) => ({ ...f, pos: dirty!.mapping.map(f.pos), page: f.page + dp })));
+    pageStarts = pageStarts.concat(cache!.pageStarts.slice(ps.nStarts).map((x) => dirty!.mapping.map(x)));
+    pageCount = Math.min(MAX_PAGES, cache!.pageCount + dp);
+    lastBottom = cache!.lastBottom + dp * P;
+    // 지난 스냅샷을 새 문서에 맞춰 옮긴다 (자연 위치는 delta 만큼, 쪽은 dp 만큼, 밀림은 그에 맞게)
+    for (let i = pj; i < cache!.snaps.length; i++) {
+      const o = cache!.snaps[i];
+      snaps[j + (i - pj)] = { ...o, top: o.top + delta, page: o.page + dp, shift: o.shift + dp * P - delta, lastBottom: o.lastBottom + dp * P, nBreaks: o.nBreaks + dB, nFn: o.nFn + dF, nStarts: o.nStarts + dS };
+    }
+  } else {
+    pageCount = Math.max(page + 1, Math.floor(Math.max(0, lastBottom - 0.5) / P) + 1);
+    if (forceNext) pageCount = Math.max(pageCount, page + 2);
+    pageCount = Math.min(pageCount, MAX_PAGES);
+  }
+  while (pageStarts.length < pageCount) pageStarts.push(doc.content.size);
+  if (pageStarts.length > pageCount) pageStarts = pageStarts.slice(0, pageCount);
+  const result: LayoutResult = { pageCount, footnotes, pageStarts };
+  return { breaks, result, cache: { doc, snaps, breaksLen: breaks.length, footnotes, pageStarts, pageCount, lastBottom }, incremental: useCache };
 }
 
 export interface PaginationStorage {
   geometry: PageGeometry | null;
   result: LayoutResult;
   listeners: Set<(r: LayoutResult) => void>;
+  /** 전체 다시 배치 (쪽 설정·너비 등 문서 밖 조건이 바뀌었을 때) */
   schedule: () => void;
+  /** 필요한 만큼만 다시 배치 (탭 전환·배율 변경처럼 문서와 쪽 조건은 그대로일 때) */
+  refresh: () => void;
   enabled: boolean;
 }
 
@@ -495,12 +680,34 @@ export const Pagination = Extension.create<{}, PaginationStorage>({
       result: { pageCount: 1, footnotes: [], pageStarts: [0] },
       listeners: new Set(),
       schedule: () => {},
+      refresh: () => {},
       enabled: true,
     };
   },
 
   addProseMirrorPlugins() {
     const storage = this.storage;
+    // 지난 배치 뒤로 바뀐 범위 (state.apply 에서 모으고 view.run 에서 쓴다)
+    const dirtyRef: { from: number | null; to: number; mapping: Mapping } = { from: null, to: 0, mapping: new Mapping() };
+    const noteDirty = (tr: { mapping: Mapping }) => {
+      let f = Infinity;
+      let t = -Infinity;
+      tr.mapping.maps.forEach((m, i) => {
+        const rest = tr.mapping.slice(i + 1);
+        m.forEach((_os, _oe, ns, ne) => {
+          f = Math.min(f, rest.map(ns, -1));
+          t = Math.max(t, rest.map(ne, 1));
+        });
+      });
+      if (dirtyRef.from == null) {
+        dirtyRef.from = f;
+        dirtyRef.to = t;
+      } else {
+        dirtyRef.from = Math.min(tr.mapping.map(dirtyRef.from, -1), f);
+        dirtyRef.to = Math.max(tr.mapping.map(dirtyRef.to, 1), t);
+      }
+      dirtyRef.mapping.appendMapping(tr.mapping);
+    };
     return [
       new Plugin<PState>({
         key: paginationKey,
@@ -510,6 +717,7 @@ export const Pagination = Extension.create<{}, PaginationStorage>({
             const meta = tr.getMeta(paginationKey) as PageBreakInfo[] | undefined;
             if (meta) return { breaks: meta, decos: buildDecos(tr.doc, meta) };
             if (tr.docChanged) {
+              noteDirty(tr);
               return {
                 breaks: value.breaks.map((b) => ({ ...b, pos: tr.mapping.map(b.pos, b.kind === 'line' ? 1 : -1) })),
                 decos: value.decos.map(tr.mapping, tr.doc),
@@ -529,6 +737,10 @@ export const Pagination = Extension.create<{}, PaginationStorage>({
           let lastResultKey = '';
           let runsSinceDocChange = 0;
           let lastDoc: PMNode | null = null;
+          let cache: LayoutCache | null = null;
+          let needFull = true;
+          let lastGeometry: PageGeometry | null = null;
+          let lastWidth = 0;
 
           const run = () => {
             raf = 0;
@@ -536,30 +748,49 @@ export const Pagination = Extension.create<{}, PaginationStorage>({
               lastDoc = view.state.doc;
               runsSinceDocChange = 0;
             }
-            // 배치가 수렴하지 않으면(이론상 없어야 함) 문서가 바뀔 때까지 중단
-            if (runsSinceDocChange > 6) return;
+            // 같은 문서에서 결과가 계속 달라지면(이론상 없어야 함) 경고만 남긴다.
+            // (전에는 중단했는데, 그림이 수십 장 로드되며 배치가 정당하게 여러 번 바뀌는 경우까지 막아 버렸다)
+            if (runsSinceDocChange > 50) {
+              console.warn('[pagination] 배치가 수렴하지 않습니다.');
+              runsSinceDocChange = 0;
+            }
             if (destroyed || !storage.geometry || !storage.enabled) return;
             const root = view.dom as HTMLElement;
             if (!root.isConnected || root.offsetParent === null) return;
             if (view.composing) return;
-            root.classList.add('pg-measuring');
+            // 쪽 크기가 바뀌었으면 처음부터 (배율은 CSS 변환이라 문서 px 좌표가 그대로이므로 다시 잴 필요 없다)
+            // 값이 같은 새 객체가 들어와도(탭 전환·다시 그리기) 전체 재배치를 반복하지 않도록 값으로 비교한다
+            if (!sameGeometry(storage.geometry, lastGeometry)) {
+              needFull = true;
+              fullReason = 'geometry';
+              lastGeometry = storage.geometry;
+            }
+            const cur = paginationKey.getState(view.state)!;
+            const dirty: DirtyRange | null = !needFull && cache && dirtyRef.from != null ? { from: dirtyRef.from, to: dirtyRef.to, mapping: dirtyRef.mapping } : null;
+            const canIncremental = !needFull && !!cache && (dirty != null || cache.doc === view.state.doc);
             let out: ReturnType<typeof computeLayout> = null;
             const t0 = performance.now();
             try {
-              out = computeLayout(view, storage.geometry);
+              if (canIncremental) out = computeLayout(view, storage.geometry, cache, dirty ?? { from: 0, to: 0, mapping: new Mapping() }, cur.breaks);
+              if (!out) out = computeLayout(view, storage.geometry);
             } catch (e) {
               console.error('pagination error', e);
-            } finally {
-              root.classList.remove('pg-measuring');
             }
             if (!out) return;
+            cache = out.cache;
+            needFull = false;
+            dirtyRef.from = null;
+            dirtyRef.to = 0;
+            dirtyRef.mapping = new Mapping();
             const dt = performance.now() - t0;
             lastCost = dt;
-            if (dt > 200) console.debug(`[pagination] ${Math.round(dt)}ms, ${out.result.pageCount}쪽, 나눔 ${out.breaks.length}`);
-            const cur = paginationKey.getState(view.state)!;
+            if (dt > 200) console.debug(`[pagination] ${Math.round(dt)}ms${out.incremental ? ' (증분)' : ''}, ${out.result.pageCount}쪽, 나눔 ${out.breaks.length}`);
+            // 시험용 추적 (tests/helpers 에서 window.__pgTrace 배열을 두면 기록한다)
+            if ((window as any).__pgTrace) (window as any).__pgTrace.push({ ms: Math.round(dt * 10) / 10, incremental: out.incremental, pages: out.result.pageCount, breaks: out.breaks.length, reason: out.incremental ? '' : fullReason, t: Math.round(performance.now()), size: view.state.doc.content.size });
+            fullReason = '';
             if (sameBreaks(cur.breaks, out.breaks)) runsSinceDocChange = 0;
-            else if (++runsSinceDocChange > 6) console.warn('[pagination] 배치가 수렴하지 않아 중단합니다.');
             else {
+              runsSinceDocChange++;
               const tr = view.state.tr.setMeta(paginationKey, out.breaks).setMeta('addToHistory', false);
               view.dispatch(tr);
             }
@@ -573,24 +804,66 @@ export const Pagination = Extension.create<{}, PaginationStorage>({
           // 큰 문서는 입력이 멈춘 뒤에 다시 배치 (타자 지연 방지)
           let lastCost = 0;
           let timer: any = null;
+          let pendingSince = 0;
           const schedule = () => {
             if (destroyed) return;
             if (lastCost > 60) {
+              // 입력이 이어지는 동안은 미루되, 요청이 계속 들어와도(그림 수백 장 로드 등) 1.5초 안에는 한 번 돈다
+              const now = performance.now();
+              if (!pendingSince) pendingSince = now;
+              const wait = Math.min(800, 150 + lastCost * 2);
+              const maxWait = Math.max(0, pendingSince + 1500 - now);
               clearTimeout(timer);
-              timer = setTimeout(() => {
-                if (!raf) raf = requestAnimationFrame(run);
-              }, Math.min(800, 150 + lastCost * 2));
+              timer = setTimeout(
+                () => {
+                  pendingSince = 0;
+                  if (!raf) raf = requestAnimationFrame(run);
+                },
+                Math.min(wait, maxWait),
+              );
               return;
             }
+            pendingSince = 0;
             if (!raf) raf = requestAnimationFrame(run);
           };
-          storage.schedule = schedule;
+          /** 전체 다시 배치 (글꼴 로드·너비 변경처럼 문서는 그대로인데 높이가 달라질 때) */
+          let fullReason = '';
+          const scheduleFull = (reason = '?') => {
+            needFull = true;
+            fullReason = reason;
+            schedule();
+          };
+          storage.schedule = () => scheduleFull('schedule');
+          storage.refresh = () => schedule();
           const onCompEnd = () => setTimeout(schedule, 0);
           view.dom.addEventListener('compositionend', onCompEnd);
-          window.addEventListener('kite:relayout', schedule);
-          const ro = new ResizeObserver(() => schedule());
+          // kite:relayout: detail.pos 가 있으면(그림 로드 등) 그 블록만 다시 재고, 없으면 전체
+          const onRelayout = (e: Event) => {
+            const pos = (e as CustomEvent).detail?.pos;
+            if (typeof pos === 'number' && cache && !needFull) {
+              const size = view.state.doc.content.size;
+              const p = Math.max(0, Math.min(size, pos));
+              dirtyRef.from = dirtyRef.from == null ? p : Math.min(dirtyRef.from, p);
+              dirtyRef.to = Math.max(dirtyRef.to, Math.min(size, p + 1));
+              schedule();
+            } else scheduleFull('relayout');
+          };
+          window.addEventListener('kite:relayout', onRelayout);
+          // 쪽 나누기 공간을 끼우면 편집기 높이가 바뀌어 다시 불리므로, 너비가 바뀔 때만 전체 재배치
+          lastWidth = view.dom.clientWidth;
+          const ro = new ResizeObserver((entries) => {
+            const w = entries[0]?.contentRect.width ?? view.dom.clientWidth;
+            if (Math.abs(w - lastWidth) < 0.5) return;
+            // 처음 화면에 붙을 때(0 → 실제 너비)는 이미 그 너비로 배치했으므로 다시 하지 않는다
+            const first = lastWidth === 0;
+            lastWidth = w;
+            if (!first) scheduleFull('width');
+          });
           ro.observe(view.dom);
-          (document as any).fonts?.ready?.then(schedule);
+          // 글꼴이 실제로 새로 로드됐을 때만 전체 재배치 (fonts.ready 는 문서를 열 때마다 한 번 더 돌게 했다)
+          const fonts: FontFaceSet | undefined = (document as any).fonts;
+          const onFonts = () => scheduleFull('fonts');
+          fonts?.addEventListener('loadingdone', onFonts);
           schedule();
           return {
             update(v, prev) {
@@ -601,8 +874,9 @@ export const Pagination = Extension.create<{}, PaginationStorage>({
               if (raf) cancelAnimationFrame(raf);
               clearTimeout(timer);
               ro.disconnect();
+              fonts?.removeEventListener('loadingdone', onFonts);
               view.dom.removeEventListener('compositionend', onCompEnd);
-              window.removeEventListener('kite:relayout', schedule);
+              window.removeEventListener('kite:relayout', onRelayout);
             },
           };
         },

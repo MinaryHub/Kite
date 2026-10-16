@@ -154,7 +154,7 @@ export class AppController {
     (await import('./mcpHandlers')).installMcpHandlers();
     platform.onAutosaveNow(async () => {
       try {
-        await this.autosaveNow();
+        await this.autosaveNow(true);
       } finally {
         platform.autosaveFlushed();
       }
@@ -451,12 +451,18 @@ export class AppController {
   }
 
   private autosavedDoc = new WeakMap<DocTab, unknown>();
-  async autosaveNow() {
+  /**
+   * 자동 저장. 큰 문서는 직렬화에 수백 ms 가 걸리므로 평소에는 입력이 멈춘 유휴 시간에 문서 하나씩 처리한다.
+   * (immediate: 로그오프·종료 때처럼 바로 해야 할 때)
+   */
+  async autosaveNow(immediate = false) {
     const jobs: Promise<unknown>[] = [];
+    const idle = () => new Promise<void>((r) => ((window as any).requestIdleCallback ? (window as any).requestIdleCallback(() => r(), { timeout: 4000 }) : setTimeout(r, 0)));
     for (const d of this.docs) {
       if (!d.dirty) continue;
       // 지난 자동 저장 뒤로 바뀐 것이 없으면 건너뛴다
       if (this.autosavedDoc.get(d) === d.editor.state.doc) continue;
+      if (!immediate) await idle();
       this.autosavedDoc.set(d, d.editor.state.doc);
       const json = JSON.stringify({ title: d.title, path: d.path, saveFormat: d.saveFormat, doc: d.toKDocument(), time: Date.now() });
       jobs.push(Promise.resolve(platform.autosaveWrite(d.id, json)).catch(() => {}));
@@ -510,7 +516,7 @@ export class AppController {
     this.zoom = zoom;
     this.zoomMode = mode;
     this.emit();
-    window.dispatchEvent(new Event('kite:relayout'));
+    // 배율은 CSS 변환이라 쪽 나누기를 다시 잴 필요가 없다 (큰 문서에서 확대/축소 때마다 300ms 가 들었다)
     this.savePrefs();
   }
 

@@ -37,7 +37,8 @@ export function PageView({ tab, active }: { tab: DocTab; active: boolean }) {
   useEffect(() => {
     if (active) {
       viewState.zoom = zoom;
-      tab.editor.storage.pagination.schedule();
+      // 배율·탭 전환은 문서 px 좌표가 그대로이므로 전체가 아니라 필요한 만큼만
+      tab.editor.storage.pagination.refresh();
       if (wsRef.current && tab.scrollTop) wsRef.current.scrollTop = tab.scrollTop;
     }
   }, [active, zoom]);
