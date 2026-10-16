@@ -1574,3 +1574,63 @@ input[type='number'] {
   /* 세로 스크롤바가 생길 때 본문 너비가 줄어 전체 쪽 나누기를 다시 하지 않도록 자리를 미리 둔다 */
   scrollbar-gutter: stable;
 }
+
+/* 여러 쪽 보기 */
+.work {
+  position: relative;
+}
+/* 편집기는 배치를 계속 맡아야 하므로 같은 크기로 뒤에 숨긴다 (display:none 이면 위치를 잴 수 없다) */
+.workspace.mp-hidden {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.workspace.multi {
+  padding: 16px 16px 24px;
+  box-sizing: border-box;
+  user-select: none;
+}
+.mp-grid {
+  display: grid;
+  justify-content: center;
+  align-content: start;
+}
+.mp-cell {
+  position: relative;
+}
+.mp-page {
+  position: relative;
+  background: #fff;
+  overflow: hidden;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.16);
+}
+.mp-page:hover {
+  box-shadow: 0 0 0 2px rgba(47, 111, 214, 0.5), 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+.mp-page.current {
+  outline: 2px solid #2f6fd6;
+  outline-offset: 2px;
+}
+.mp-page .mp-scale {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+.mp-page .print-page {
+  break-after: auto;
+  page-break-after: auto;
+}
+.mp-label {
+  text-align: center;
+  font-size: 12px;
+  line-height: 22px;
+  color: var(--c-text-dim);
+}
+.zoom-ctl button.on {
+  background: #dfe8f7;
+  color: #1d4ea0;
+}

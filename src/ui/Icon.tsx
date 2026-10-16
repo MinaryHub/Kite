@@ -8,7 +8,7 @@ import {
   Rows3, Save, SaveAll, Scissors, Search, SeparatorHorizontal, Settings, SpellCheck, Split, Strikethrough,
   Subscript, Superscript, Table, TextSelect, Trash2, Type, Underline, Undo2, X, ZoomIn, ZoomOut,
   ChevronDown, ChevronUp, ChevronRight, Plus, Highlighter, Baseline, Check, FileType2, ArrowUp, ArrowDown,
-  RotateCcw, Maximize2, ArrowLeft, ArrowRight, Crop, Sparkles, Plug, type LucideIcon,
+  RotateCcw, Maximize2, ArrowLeft, ArrowRight, Crop, Sparkles, Plug, LayoutGrid, type LucideIcon,
 } from 'lucide-react';
 
 const ICONS: Record<string, LucideIcon> = {
@@ -21,7 +21,7 @@ const ICONS: Record<string, LucideIcon> = {
   Rows3, Save, SaveAll, Scissors, Search, SeparatorHorizontal, Settings, SpellCheck, Split, Strikethrough,
   Subscript, Superscript, Table, TextSelect, Trash2, Type, Underline, Undo2, X, ZoomIn, ZoomOut,
   ChevronDown, ChevronUp, ChevronRight, Plus, Highlighter, Baseline, Check, FileType2, ArrowUp, ArrowDown,
-  RotateCcw, Maximize2, ArrowLeft, ArrowRight, Crop, Sparkles, Plug,
+  RotateCcw, Maximize2, ArrowLeft, ArrowRight, Crop, Sparkles, Plug, LayoutGrid,
 };
 
 export function Icon({ name, size = 16, color, strokeWidth = 1.7 }: { name?: string; size?: number; color?: string; strokeWidth?: number }) {

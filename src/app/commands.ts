@@ -210,6 +210,15 @@ export const commands: Record<string, Command> = {
   'view.zoom100': { label: '100%', shortcut: 'Ctrl+0', keys: ['Ctrl+0'], run: () => app.setZoom(1) },
   'view.fitWidth': { label: '폭 맞춤', run: () => window.dispatchEvent(new CustomEvent('kite:fit', { detail: 'width' })) },
   'view.fitPage': { label: '쪽 맞춤', run: () => window.dispatchEvent(new CustomEvent('kite:fit', { detail: 'page' })) },
+  'view.multiPage': {
+    label: '여러 쪽 보기',
+    icon: 'LayoutGrid',
+    shortcut: 'Ctrl+Alt+M',
+    keys: ['Ctrl+Alt+M'],
+    run: () => app.setMultiPage(!app.multiPage),
+    active: () => app.multiPage,
+    enabled: hasDoc,
+  },
   'view.fullscreen': { label: '전체 화면', shortcut: 'F11', keys: ['F11'], run: () => platform.toggleFullscreen() },
 
   // ----- 입력 -----

@@ -11,7 +11,7 @@ import { FN_FONT_PX, FN_LINE, FN_SEP } from '../editor/extensions/pagination';
 import { showContextMenu } from './ContextMenu';
 import { platform } from '../platform';
 
-export function PageView({ tab, active }: { tab: DocTab; active: boolean }) {
+export function PageView({ tab, active, hidden = false }: { tab: DocTab; active: boolean; hidden?: boolean }) {
   const app = useApp();
   const [, force] = useReducer((x: number) => x + 1, 0);
   const wsRef = useRef<HTMLDivElement>(null);
@@ -241,7 +241,7 @@ export function PageView({ tab, active }: { tab: DocTab; active: boolean }) {
 
   return (
     <div
-      className={'workspace' + (active ? '' : ' hidden-doc')}
+      className={'workspace' + (active ? '' : ' hidden-doc') + (hidden ? ' mp-hidden' : '')}
       data-doc={tab.id}
       ref={wsRef}
       onWheel={onWheel}

@@ -6,6 +6,7 @@ import { BasicToolbar, FormatBar } from './ui/Toolbar';
 import { TabBar } from './ui/TabBar';
 import { Ruler } from './ui/Ruler';
 import { PageView } from './ui/PageView';
+import { MultiPageView } from './ui/MultiPageView';
 import { StatusBar } from './ui/StatusBar';
 import { FindPanel } from './ui/FindPanel';
 import { Dialogs } from './ui/Dialogs';
@@ -50,10 +51,11 @@ export function App() {
       <TabBar />
       <div className="main-row">
       <div className="work">
-        {app.docs.length > 0 && <Ruler />}
+        {app.docs.length > 0 && !app.multiPage && <Ruler />}
         {app.docs.map((d) => (
-          <PageView key={d.id} tab={d} active={d.id === app.activeId} />
+          <PageView key={d.id} tab={d} active={d.id === app.activeId} hidden={app.multiPage} />
         ))}
+        {app.multiPage && app.active && <MultiPageView key={app.active.id} tab={app.active} />}
         {app.docs.length === 0 && <StartScreen />}
         <FindPanel />
       </div>

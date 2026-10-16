@@ -86,6 +86,8 @@ export class AppController {
   activeId: string | null = null;
   zoom = 1;
   zoomMode: 'custom' | 'width' | 'page' = 'custom';
+  /** 여러 쪽 보기 (쪽 사본을 격자로; 누르면 그 자리로 돌아가 편집) */
+  multiPage = false;
   view: ViewOptions = { ruler: true, statusbar: true, marks: false, guides: true, transparent: true, toolbar: true, formatbar: true };
   dialog: DialogState | null = null;
   confirmState: ConfirmState | null = null;
@@ -518,6 +520,12 @@ export class AppController {
     this.emit();
     // 배율은 CSS 변환이라 쪽 나누기를 다시 잴 필요가 없다 (큰 문서에서 확대/축소 때마다 300ms 가 들었다)
     this.savePrefs();
+  }
+
+  setMultiPage(on: boolean) {
+    if (this.multiPage === on) return;
+    this.multiPage = on;
+    this.emit();
   }
 
   toggleView(k: keyof ViewOptions) {

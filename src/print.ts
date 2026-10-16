@@ -99,46 +99,60 @@ export function pageChromeHtml(tab: DocTab, g: PageGeom, k: number, pageCount: n
   return html;
 }
 
-/** 편집 화면의 배치를 그대로 쪽 단위로 잘라 인쇄용 DOM을 만든다 */
-export function buildPrintPages(tab: DocTab, g: PageGeom): HTMLElement[] {
-  const root = tab.editor.view.dom as HTMLElement;
+export interface PageBox {
+  el: HTMLElement;
+  top: number;
+  bottom: number;
+}
+
+/** 편집기 최상위 블록들의 세로 위치 (쪽 나누기 공간은 제외) */
+export function collectPageBoxes(root: HTMLElement): PageBox[] {
   const children = Array.from(root.children) as HTMLElement[];
-  const boxes = children
+  return children
     .filter((el) => !el.classList.contains('pg-spacer') && !el.classList.contains('ProseMirror-gapcursor'))
     .map((el) => ({ el, top: el.offsetTop, bottom: el.offsetTop + el.offsetHeight }));
+}
+
+/** k 번째 쪽: 편집 화면의 블록 사본을 쪽 안 자리에 놓고 머리말·꼬리말·쪽 번호·각주를 붙인다 */
+export function buildPrintPage(tab: DocTab, g: PageGeom, k: number, boxes: PageBox[], pageCount: number): HTMLElement {
+  const page = document.createElement('div');
+  page.className = 'print-page';
+  page.style.width = `${g.wMm}mm`;
+  page.style.height = `${g.hMm}mm`;
+  const body = document.createElement('div');
+  body.className = 'print-body';
+  Object.assign(body.style, { left: `${g.ml}px`, top: `${g.mt}px`, width: `${g.contentW}px`, height: `${g.contentH}px` });
+  const content = document.createElement('div');
+  content.className = 'kdoc-content';
+  Object.assign(content.style, { position: 'relative', width: `${g.contentW}px`, height: `${g.contentH}px` });
+  const y0 = k * g.P;
+  const y1 = y0 + g.contentH;
+  for (const b of boxes) {
+    if (b.bottom <= y0 || b.top >= y1) continue;
+    const clone = b.el.cloneNode(true) as HTMLElement;
+    clone.style.position = 'absolute';
+    clone.style.top = `${b.top - y0}px`;
+    clone.style.left = '0';
+    clone.style.right = '0';
+    clone.classList.remove('pg-measuring');
+    clone.querySelectorAll('.selectedCell').forEach((e) => e.classList.remove('selectedCell'));
+    clone.querySelectorAll('.search-match').forEach((e) => e.classList.remove('search-match', 'current'));
+    content.appendChild(clone);
+  }
+  body.appendChild(content);
+  page.appendChild(body);
+  const chrome = document.createElement('div');
+  chrome.innerHTML = pageChromeHtml(tab, g, k, pageCount);
+  while (chrome.firstChild) page.appendChild(chrome.firstChild);
+  return page;
+}
+
+/** 편집 화면의 배치를 그대로 쪽 단위로 잘라 인쇄용 DOM을 만든다 */
+export function buildPrintPages(tab: DocTab, g: PageGeom): HTMLElement[] {
+  const boxes = collectPageBoxes(tab.editor.view.dom as HTMLElement);
   const pageCount = Math.max(1, tab.layout.pageCount);
   const pages: HTMLElement[] = [];
-  for (let k = 0; k < pageCount; k++) {
-    const page = document.createElement('div');
-    page.className = 'print-page';
-    page.style.width = `${g.wMm}mm`;
-    page.style.height = `${g.hMm}mm`;
-    const body = document.createElement('div');
-    body.className = 'print-body';
-    Object.assign(body.style, { left: `${g.ml}px`, top: `${g.mt}px`, width: `${g.contentW}px`, height: `${g.contentH}px` });
-    const content = document.createElement('div');
-    content.className = 'kdoc-content';
-    Object.assign(content.style, { position: 'relative', width: `${g.contentW}px`, height: `${g.contentH}px` });
-    const y0 = k * g.P;
-    const y1 = y0 + g.contentH;
-    for (const b of boxes) {
-      if (b.bottom <= y0 || b.top >= y1) continue;
-      const clone = b.el.cloneNode(true) as HTMLElement;
-      clone.style.position = 'absolute';
-      clone.style.top = `${b.top - y0}px`;
-      clone.style.left = '0';
-      clone.style.right = '0';
-      clone.querySelectorAll('.selectedCell').forEach((e) => e.classList.remove('selectedCell'));
-      clone.querySelectorAll('.search-match').forEach((e) => e.classList.remove('search-match', 'current'));
-      content.appendChild(clone);
-    }
-    body.appendChild(content);
-    page.appendChild(body);
-    const chrome = document.createElement('div');
-    chrome.innerHTML = pageChromeHtml(tab, g, k, pageCount);
-    while (chrome.firstChild) page.appendChild(chrome.firstChild);
-    pages.push(page);
-  }
+  for (let k = 0; k < pageCount; k++) pages.push(buildPrintPage(tab, g, k, boxes, pageCount));
   return pages;
 }
 

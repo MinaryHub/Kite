@@ -76,6 +76,9 @@ export function StatusBar() {
         <button onClick={() => runCommand('view.fitPage')} title="쪽 맞춤">
           쪽 맞춤
         </button>
+        <button className={app.multiPage ? 'on' : ''} onClick={() => runCommand('view.multiPage')} title="여러 쪽 보기 (Ctrl+Alt+M)">
+          여러 쪽
+        </button>
         <button onClick={() => app.setZoom(app.zoom - 0.1)} title="축소">
           −
         </button>

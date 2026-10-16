@@ -56,6 +56,7 @@ const MENUS: { label: string; key: string; items: () => MenuEntry[] }[] = [
       'view.zoom100',
       'view.fitWidth',
       'view.fitPage',
+      'view.multiPage',
       '-',
       'view.fullscreen',
     ],
