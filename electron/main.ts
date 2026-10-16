@@ -7,6 +7,15 @@ import { initMcpHost, isMcpBridge, runMcpBridge } from './mcp';
 
 /** AI 앱이 실행한 MCP 다리(Kite.exe --mcp): 창 없이 표준 입출력으로만 동작한다 */
 const MCP_BRIDGE = isMcpBridge();
+if (MCP_BRIDGE) {
+  // 다리는 화면을 그리지 않는다: GPU·캐시를 끄고, 브라우저 캐시는 임시 폴더로 보낸다
+  // (실행 중인 Kite 와 같은 데이터 폴더의 캐시를 두고 다투지 않게. 토큰·파이프 기록은 userData 에 그대로 둔다)
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch('disable-gpu');
+  app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+  app.commandLine.appendSwitch('disk-cache-size', '1');
+  app.setPath('sessionData', path.join(os.tmpdir(), 'kite-mcp-bridge'));
+}
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 let mainWindow: BrowserWindow | null = null;

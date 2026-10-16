@@ -1,3 +1,4 @@
+import { forEachSelectedPara } from '../editor/extensions/paragraphFormat';
 import type { Editor } from '@tiptap/react';
 import { CellSelection } from '@tiptap/pm/tables';
 import { NodeSelection } from '@tiptap/pm/state';
@@ -68,21 +69,22 @@ export function applyFormatPainter() {
   const editor = ed();
   const p = app.painter;
   if (!editor || !p) return;
-  const { from, to, empty } = editor.state.selection;
-  if (empty) return;
+  const sel = editor.state.selection;
+  if (sel.empty) return;
   const tr = editor.state.tr;
-  tr.removeMark(from, to);
-  for (const m of p.marks) {
-    const type = editor.schema.marks[m.type];
-    if (type) tr.addMark(from, to, type.create(m.attrs));
+  // 셀 블록 선택이면 셀마다 범위가 따로 있다
+  for (const r of sel.ranges) {
+    const from = r.$from.pos;
+    const to = r.$to.pos;
+    tr.removeMark(from, to);
+    for (const m of p.marks) {
+      const type = editor.schema.marks[m.type];
+      if (type) tr.addMark(from, to, type.create(m.attrs));
+    }
   }
   if (p.para) {
-    editor.state.doc.nodesBetween(from, to, (node, pos) => {
-      if (node.type.name === 'paragraph' || node.type.name === 'heading') {
-        tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...p.para, level: node.attrs.level });
-        return false;
-      }
-      return true;
+    forEachSelectedPara(editor.state, (node, pos) => {
+      tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...p.para, level: node.attrs.level });
     });
   }
   editor.view.dispatch(tr);

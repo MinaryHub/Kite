@@ -106,7 +106,10 @@ export function AiDesktopPanel() {
           {msg && <div className={'ai-desk-msg' + (msg.ok ? '' : ' err')}>{msg.text}</div>}
         </Step>
         <Step done={false} n={4} title="Claude 데스크톱 열기">
-          <div className="unit">등록한 뒤 처음 한 번은 Claude 데스크톱을 완전히 끝냈다가(트레이 아이콘 → 끝내기) 다시 여세요.</div>
+          <div className="unit">
+            등록한 뒤 처음 한 번, 그리고 Kite 를 새 버전으로 설치한 뒤에는 Claude 데스크톱을 완전히 끝냈다가(트레이 아이콘 → 끝내기) 다시 여세요. Claude 설정에
+            'Server disconnected' 가 보일 때도 같습니다.
+          </div>
           <button
             className="btn small"
             disabled={!st.claudeInstalled}

@@ -1,4 +1,6 @@
 import { Extension } from '@tiptap/core';
+import type { EditorState } from '@tiptap/pm/state';
+import type { Node as PMNode } from '@tiptap/pm/model';
 import { cssToPt, normLineHeight, r2 } from '../cssUnits';
 import { normColor } from '../../formats/common';
 
@@ -15,6 +17,29 @@ declare module '@tiptap/core' {
 }
 
 export const PARA_TYPES = ['paragraph', 'heading'];
+
+/**
+ * 선택 영역 안의 문단마다 fn 을 부른다.
+ * 셀 블록 선택(CellSelection)은 from~to 가 마지막 셀만 가리키므로 셀마다 있는 ranges 를 모두 돈다.
+ */
+export function forEachSelectedPara(state: EditorState, fn: (node: PMNode, pos: number) => void): number {
+  const seen = new Set<number>();
+  for (const r of state.selection.ranges) {
+    const from = Math.min(r.$from.pos, r.$to.pos);
+    const to = Math.max(r.$from.pos, r.$to.pos);
+    state.doc.nodesBetween(from, to, (node, pos) => {
+      if (PARA_TYPES.includes(node.type.name)) {
+        if (!seen.has(pos)) {
+          seen.add(pos);
+          fn(node, pos);
+        }
+        return false;
+      }
+      return true;
+    });
+  }
+  return seen.size;
+}
 
 const ptAttr = (cssProp: string, styleProp: string) => ({
   default: null,
@@ -130,16 +155,7 @@ export const ParagraphFormat = Extension.create({
       setParagraphAttrs:
         (attrs) =>
         ({ tr, state, dispatch }) => {
-          const { from, to } = state.selection;
-          let changed = false;
-          state.doc.nodesBetween(from, to, (node, pos) => {
-            if (PARA_TYPES.includes(node.type.name)) {
-              tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...attrs });
-              changed = true;
-              return false;
-            }
-            return true;
-          });
+          const changed = forEachSelectedPara(state, (node, pos) => tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...attrs })) > 0;
           if (changed && dispatch) dispatch(tr);
           return changed;
         },
@@ -154,17 +170,12 @@ export const ParagraphFormat = Extension.create({
       changeLineHeight:
         (delta) =>
         ({ tr, state, dispatch }) => {
-          const { from, to } = state.selection;
-          state.doc.nodesBetween(from, to, (node, pos) => {
-            if (PARA_TYPES.includes(node.type.name)) {
-              const cur = node.attrs.lineHeight;
-              let pct = 160;
-              if (cur && !/pt$/.test(cur)) pct = Math.round(parseFloat(cur) * 100);
-              const next = Math.max(50, Math.min(500, pct + delta));
-              tr.setNodeMarkup(pos, undefined, { ...node.attrs, lineHeight: next === 160 ? null : String(next / 100) });
-              return false;
-            }
-            return true;
+          forEachSelectedPara(state, (node, pos) => {
+            const cur = node.attrs.lineHeight;
+            let pct = 160;
+            if (cur && !/pt$/.test(cur)) pct = Math.round(parseFloat(cur) * 100);
+            const next = Math.max(50, Math.min(500, pct + delta));
+            tr.setNodeMarkup(pos, undefined, { ...node.attrs, lineHeight: next === 160 ? null : String(next / 100) });
           });
           if (dispatch) dispatch(tr);
           return true;
@@ -172,14 +183,9 @@ export const ParagraphFormat = Extension.create({
       changeIndent:
         (delta) =>
         ({ tr, state, dispatch }) => {
-          const { from, to } = state.selection;
-          state.doc.nodesBetween(from, to, (node, pos) => {
-            if (PARA_TYPES.includes(node.type.name)) {
-              const v = Math.max(0, (node.attrs.indentLeft || 0) + delta);
-              tr.setNodeMarkup(pos, undefined, { ...node.attrs, indentLeft: v ? r2(v) : null });
-              return false;
-            }
-            return true;
+          forEachSelectedPara(state, (node, pos) => {
+            const v = Math.max(0, (node.attrs.indentLeft || 0) + delta);
+            tr.setNodeMarkup(pos, undefined, { ...node.attrs, indentLeft: v ? r2(v) : null });
           });
           if (dispatch) dispatch(tr);
           return true;
