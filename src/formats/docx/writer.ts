@@ -196,6 +196,7 @@ function tableXml(ctx: Ctx, t: FlatTable): string {
 }
 
 function blockXml(ctx: Ctx, b: FlatBlock): string {
+  if (b.kind === 'box') return b.blocks.map((x) => blockXml(ctx, x)).join('');
   return b.kind === 'para' ? paragraphXml(ctx, b) : tableXml(ctx, b);
 }
 
@@ -203,7 +204,8 @@ function collectImages(blocks: FlatBlock[], out: Set<string>) {
   for (const b of blocks) {
     if (b.kind === 'para') {
       for (const i of b.inlines) if (i.type === 'image' && i.src) out.add(i.src);
-    } else for (const row of b.cells) for (const c of row) collectImages(c.blocks, out);
+    } else if (b.kind === 'box') collectImages(b.blocks, out);
+    else for (const row of b.cells) for (const c of row) collectImages(c.blocks, out);
   }
 }
 

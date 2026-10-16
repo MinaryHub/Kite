@@ -506,3 +506,42 @@
   border: 2px solid #2f6fd6;
   border-radius: 2px;
 }
+
+/* 글상자: 정해진 크기의 상자 안에 문단. 배경 그림은 상자에 꽉 채운다 */
+.kdoc-content .k-textbox,
+.print-page .k-textbox {
+  box-sizing: border-box;
+  position: relative;
+  max-width: 100%;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  padding: 4px;
+}
+.kdoc-content .k-textbox > :first-child,
+.print-page .k-textbox > :first-child {
+  margin-top: 0;
+}
+
+/* 탭: 폭이 정해진 탭은 그 폭만큼 차지하고(탭 글자 자체는 0 폭), 채움 종류에 따라 점선·실선을 아래쪽에 그린다 */
+.kdoc-content .k-tab[style*='width'],
+.print-page .k-tab[style*='width'] {
+  display: inline-block;
+  tab-size: 0;
+  overflow: hidden;
+  white-space: pre;
+  vertical-align: baseline;
+  max-width: 100%;
+}
+.k-tab[data-leader='2'],
+.k-tab[data-leader='3'],
+.k-tab[data-leader='6'] {
+  background: radial-gradient(circle, currentColor 0.6px, transparent 0.9px) 1px calc(100% - 0.3em) / 4px 2px repeat-x;
+}
+.k-tab[data-leader='1'],
+.k-tab[data-leader='7'] {
+  background: linear-gradient(currentColor, currentColor) 0 calc(100% - 0.3em) / 100% 1px no-repeat;
+}
+.k-tab[data-leader='4'],
+.k-tab[data-leader='5'] {
+  background: repeating-linear-gradient(90deg, currentColor 0 3px, transparent 3px 6px) 0 calc(100% - 0.3em) / 100% 1px no-repeat;
+}

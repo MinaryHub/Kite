@@ -1,4 +1,4 @@
-import { Extension, Node, mergeAttributes } from '@tiptap/core';
+import { Extension, Mark, Node, mergeAttributes } from '@tiptap/core';
 import Image from '@tiptap/extension-image';
 import BulletList from '@tiptap/extension-bullet-list';
 import OrderedList from '@tiptap/extension-ordered-list';
@@ -19,6 +19,94 @@ declare module '@tiptap/core' {
     overwrite: { toggleOverwrite: () => ReturnType };
   }
 }
+
+// ---------------- 글상자 (도형 안의 글) ----------------
+const RADIUS_RE = /^[\d.]+(px|%)$/;
+
+/** 한글의 글상자·도형 안 글. 크기가 정해진 상자 안에 문단이 들어가며, 배경(색·그림)과 테두리를 가진다 */
+export const TextBox = Node.create({
+  name: 'textBox',
+  group: 'block',
+  content: 'block+',
+  defining: true,
+  isolating: true,
+  addAttributes() {
+    const plain = { default: null, rendered: false };
+    return { width: plain, height: plain, bg: plain, bgImage: plain, borderColor: plain, borderWidth: plain, radius: plain, padding: plain };
+  },
+  parseHTML() {
+    return [
+      {
+        tag: 'div.k-textbox',
+        getAttrs: (el) => {
+          const st = (el as HTMLElement).style;
+          const m = /url\("?([^")]+)"?\)/.exec(st.backgroundImage || '');
+          const pad = st.padding ? st.padding.split(/\s+/).map(parseFloat) : null;
+          return {
+            width: parseFloat(st.width) || null,
+            height: parseFloat(st.minHeight) || null,
+            bg: normColor(st.backgroundColor),
+            bgImage: m && /^data:image\//.test(m[1]) ? m[1] : null,
+            borderColor: normColor(st.borderColor),
+            borderWidth: parseFloat(st.borderWidth) || null,
+            radius: RADIUS_RE.test(st.borderRadius) ? st.borderRadius : null,
+            padding: pad && pad.length === 4 && pad.every(Number.isFinite) ? pad : null,
+          };
+        },
+      },
+    ];
+  },
+  renderHTML({ node }) {
+    const a = node.attrs;
+    const num = (v: any) => (Number.isFinite(+v) && +v > 0 ? +v : 0);
+    const st: string[] = [];
+    if (num(a.width)) st.push(`width:${num(a.width)}px`);
+    if (num(a.height)) st.push(`min-height:${num(a.height)}px`);
+    const bg = normColor(a.bg);
+    if (bg) st.push(`background-color:${bg}`);
+    if (typeof a.bgImage === 'string' && /^data:image\//.test(a.bgImage)) st.push(`background-image:url("${a.bgImage}")`);
+    const bc = normColor(a.borderColor);
+    if (bc) st.push(`border:${num(a.borderWidth) || 1}px solid ${bc}`);
+    if (typeof a.radius === 'string' && RADIUS_RE.test(a.radius)) st.push(`border-radius:${a.radius}`);
+    if (Array.isArray(a.padding) && a.padding.length === 4) st.push(`padding:${a.padding.map((v: any) => Math.max(0, +v || 0) + 'px').join(' ')}`);
+    return ['div', { class: 'k-textbox', style: st.join(';') }, 0];
+  },
+});
+
+// ---------------- 탭 (폭·채움) ----------------
+/** 탭 글자(\t) 하나에 붙는 마크. 한글 문서의 탭은 폭과 채움(점선 등)을 가진다 */
+export const TabStop = Mark.create({
+  name: 'tab',
+  inclusive: false,
+  addAttributes() {
+    return {
+      /** 탭이 차지하는 폭(px). 없으면 기본 탭 간격 */
+      width: {
+        default: null,
+        parseHTML: (el: HTMLElement) => parseFloat(el.style.width) || null,
+        renderHTML: (a: Record<string, any>) => (Number.isFinite(+a.width) && +a.width > 0 ? { style: `width:${+a.width}px` } : {}),
+      },
+      /** 채움 종류 (0 없음, 1 실선, 2 긴 점선, 3 점선, 4 -.-, 5 -..-, 6 원점선, 7 이중선) */
+      leader: {
+        default: 0,
+        parseHTML: (el: HTMLElement) => +(el.getAttribute('data-leader') || 0),
+        renderHTML: (a: Record<string, any>) => (+a.leader ? { 'data-leader': String(+a.leader) } : {}),
+      },
+      /** 탭 종류 (한글 값 그대로 보존) */
+      type: {
+        default: 0,
+        parseHTML: (el: HTMLElement) => +(el.getAttribute('data-tab-type') || 0),
+        renderHTML: (a: Record<string, any>) => (+a.type ? { 'data-tab-type': String(+a.type) } : {}),
+      },
+    };
+  },
+  parseHTML() {
+    return [{ tag: 'span.k-tab' }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ['span', mergeAttributes({ class: 'k-tab' }, HTMLAttributes), 0];
+  },
+});
 
 // ---------------- 그림 (크기 조절·자르기) ----------------
 export interface Crop {

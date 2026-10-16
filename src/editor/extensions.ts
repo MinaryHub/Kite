@@ -27,6 +27,8 @@ import {
   KTableHeader,
   KeyboardExtras,
   CellNoWrap,
+  TextBox,
+  TabStop,
 } from './extensions/nodes';
 import { Search } from './extensions/search';
 import { Pagination } from './extensions/pagination';
@@ -92,6 +94,8 @@ export function getExtensions(): AnyExtension[] {
     TextStyleExt,
     PageBreak,
     Footnote,
+    TextBox,
+    TabStop,
   ];
 }
 

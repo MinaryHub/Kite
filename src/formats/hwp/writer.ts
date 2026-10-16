@@ -2,19 +2,7 @@ import * as CFB from 'cfb';
 import { deflateRaw } from 'pako';
 import type { KDocument } from '../../types';
 import { type JNode, mmToHwp, pxToHwp, ptToHwp, parseBorderCss, HWP_BORDER_WIDTHS } from '../common';
-import {
-  type CharStyle,
-  type FlatBlock,
-  type FlatInline,
-  type FlatPara,
-  type FlatTable,
-  type ParaStyle,
-  charKey,
-  defaultChar,
-  defaultPara,
-  flattenDoc,
-  paraKey,
-} from '../flatten';
+import { type CharStyle, type FlatBlock, type FlatInline, type FlatPara, type FlatTable, type ParaStyle, charKey, defaultChar, defaultPara, flattenDoc, paraKey, unwrapBoxes } from '../flatten';
 import { prepareImage } from '../imageUtil';
 
 /**
@@ -417,7 +405,11 @@ class BodyWriter {
         pb.maxSize = Math.max(pb.maxSize, it.style.size);
         for (const ch of it.text) {
           const code = ch.codePointAt(0)!;
-          if (ch === '\t') pb.text.push(9, 4000, 0, 0, 0, 0, 0, 9);
+          if (ch === '\t') {
+            // 탭: 폭(UINT32)·채움·종류를 가진 8 WCHAR 인라인 컨트롤
+            const tw = it.tab?.width ? pxToHwp(it.tab.width) : 4000;
+            pb.text.push(9, tw & 0xffff, tw >>> 16, ((it.tab?.leader || 0) & 0xff) | (((it.tab?.type || 0) & 0xff) << 8), 0, 0, 0, 9);
+          }
           else if (code < 32) continue;
           else if (code > 0xffff) {
             const s = ch;
@@ -673,7 +665,8 @@ class BodyWriter {
     blocks.forEach((b, i) => {
       const last = i === blocks.length - 1;
       if (b.kind === 'para') this.para(b, level, last, topLevel && i === 0);
-      else this.table(b, level, last);
+      else if (b.kind === 'table') this.table(b, level, last);
+      else this.blocks(b.blocks, level, false);
     });
   }
 }
@@ -682,7 +675,8 @@ function collectImages(blocks: FlatBlock[], out: Set<string>) {
   for (const b of blocks) {
     if (b.kind === 'para') {
       for (const i of b.inlines) if (i.type === 'image' && i.src) out.add(i.src);
-    } else for (const row of b.cells) for (const c of row) collectImages(c.blocks, out);
+    } else if (b.kind === 'box') collectImages(b.blocks, out);
+    else for (const row of b.cells) for (const c of row) collectImages(c.blocks, out);
   }
 }
 
@@ -696,7 +690,8 @@ function previewText(blocks: FlatBlock[]): string {
 }
 
 export async function writeHwp(doc: KDocument, opts: { pageCount?: number } = {}): Promise<Uint8Array> {
-  const blocks = flattenDoc(doc.content as JNode);
+  // 글상자는 아직 HWP 바이너리로 쓰지 않으므로 안의 문단만 남긴다
+  const blocks = unwrapBoxes(flattenDoc(doc.content as JNode));
   if (!blocks.length || blocks[0].kind !== 'para') blocks.unshift({ kind: 'para', style: defaultPara(), baseChar: defaultChar(), inlines: [], pageBreakBefore: false });
   const reg = new Registry();
   const pg = doc.settings.page;

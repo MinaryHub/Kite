@@ -453,9 +453,16 @@ export class HwpxConverter {
       if (n.nodeType !== 1) continue;
       const el = n as Element;
       switch (localName(el)) {
-        case 'tab':
-          push('\t');
+        case 'tab': {
+          // 탭은 폭(HWPUNIT)·채움·종류를 가진다 → 탭 글자 하나에 마크로 붙인다
+          const tw = numAttr(el, 'width', 0);
+          const n = textNode('\t', [
+            ...charMarks(cp, this.linkHref, this.markpen),
+            { type: 'tab', attrs: { width: tw > 0 ? Math.round(hwpToPx(tw) * 100) / 100 : null, leader: numAttr(el, 'leader', 0), type: numAttr(el, 'type', 0) } },
+          ]);
+          if (n) inline.push(n);
           break;
+        }
         case 'lineBreak':
           inline.push({ type: 'hardBreak' });
           break;
@@ -633,15 +640,35 @@ export class HwpxConverter {
     return { type: 'image', attrs: { src, width: w || null, height: h || null, crop } };
   }
 
-  /** 글상자 등 도형 → 안의 문단 */
+  /** 글상자 등 도형 → 글상자 노드 (크기·테두리·배경을 가진 상자 안의 문단) */
   convertShape(shape: Element): JNode[] {
     const dt = kid(shape, 'drawText');
     if (!dt) return [];
+    const name = localName(shape);
     const wb = descendant(shape, 'winBrush');
     let bg = normColor(attr(wb, 'faceColor'));
     if (bg === '#FFFFFF') bg = null;
     const ps = kids(kid(dt, 'subList'), 'p');
-    return this.convertParagraphs(ps, { inSub: true, bg });
+    const content = this.convertParagraphs(ps, { inSub: true });
+    const sz = kid(shape, 'sz') || kid(shape, 'curSz');
+    const w = Math.round(hwpToPx(numAttr(sz, 'width', 0))) || null;
+    const h = Math.round(hwpToPx(numAttr(sz, 'height', 0))) || null;
+    const ls = kid(shape, 'lineShape');
+    const lineStyle = attr(ls, 'style');
+    const borderColor = ls && lineStyle !== 'NONE' && numAttr(ls, 'width', 1) > 0 ? normColor(attr(ls, 'color')) || '#000000' : null;
+    // 선 굵기 단위는 0.01mm
+    const borderWidth = borderColor ? Math.max(0.75, Math.min(8, numAttr(ls, 'width', 12) * 0.0378)) : null;
+    const tm = kid(dt, 'textMargin');
+    const padding = tm ? ['top', 'right', 'bottom', 'left'].map((k) => Math.round(hwpToPx(numAttr(tm, k, 283)))) : null;
+    let radius: string | null = null;
+    if (name === 'ellipse') radius = '50%';
+    else {
+      const ratio = numAttr(shape, 'ratio', 0);
+      if (ratio > 0 && w && h) radius = `${Math.round((Math.min(w, h) * Math.min(50, ratio)) / 200)}px`;
+    }
+    const ib = descendant(shape, 'imgBrush');
+    const bgImage = ib ? this.images.get(attr(kid(ib, 'img'), 'binaryItemIDRef') || '') || null : null;
+    return [{ type: 'textBox', attrs: { width: w, height: h, bg, bgImage, borderColor, borderWidth, radius, padding }, content: content.length ? content : [paragraph()] }];
   }
 
   convertContainer(c: Element): JNode[] {

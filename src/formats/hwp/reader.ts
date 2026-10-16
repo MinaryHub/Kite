@@ -54,6 +54,8 @@ const T = {
   PAGE_DEF: 73,
   SHAPE_COMPONENT: 76,
   TABLE: 77,
+  SHAPE_COMPONENT_RECTANGLE: 79,
+  SHAPE_COMPONENT_ELLIPSE: 80,
   SHAPE_COMPONENT_PICTURE: 85,
   SHAPE_COMPONENT_CONTAINER: 86,
   CTRL_DATA: 87,
@@ -443,8 +445,16 @@ class HwpConverter {
           continue;
         }
         if (INLINE_CTRL.has(c)) {
-          if (c === 9) addChar('\t', i);
-          else if (c === 4) {
+          if (c === 9) {
+            // 탭 인라인 컨트롤: [9, 폭(UINT32), 채움(UINT8)+종류(UINT8), 예비, …, 9]
+            pushText();
+            const tw = u16(textRec, (i + 1) * 2) | (u16(textRec, (i + 2) * 2) << 16);
+            const t = textNode('\t', [
+              ...charMarks(this.charPr(shapeAt(i)), this.linkHref),
+              { type: 'tab', attrs: { width: tw > 0 && tw < 0x1000000 ? Math.round(hwpToPx(tw) * 100) / 100 : null, leader: u8(textRec, (i + 3) * 2), type: u8(textRec, (i + 3) * 2 + 1) } },
+            ]);
+            if (t) inline.push(t);
+          } else if (c === 4) {
             pushText();
             this.linkHref = null;
           }
@@ -660,13 +670,20 @@ class HwpConverter {
     const w = Math.round(hwpToPx(u32(ctrl, 16)));
     const h = Math.round(hwpToPx(u32(ctrl, 20)));
     const pics: Rec[] = [];
-    const texts: { paras: Rec[] }[] = [];
+    const texts: { header: Rec; paras: Rec[]; shape: Rec }[] = [];
+    let shapeRec: Rec | null = null;
+    let rectRec: Rec | null = null;
+    let ellipse = false;
     const visit = (r: Rec) => {
-      let curText: { paras: Rec[] } | null = null;
+      let curText: { header: Rec; paras: Rec[]; shape: Rec } | null = null;
       for (const c of r.children) {
         if (c.tag === T.SHAPE_COMPONENT_PICTURE) pics.push(c);
+        else if (c.tag === T.SHAPE_COMPONENT && !shapeRec) shapeRec = c;
+        else if (c.tag === T.SHAPE_COMPONENT_RECTANGLE) rectRec = c;
+        else if (c.tag === T.SHAPE_COMPONENT_ELLIPSE) ellipse = true;
         else if (c.tag === T.LIST_HEADER) {
-          curText = { paras: [] };
+          // 글상자의 문단 목록: 이 목록을 가진 개체(r)의 위치·크기로 묶음 안에서의 자리를 안다
+          curText = { header: c, paras: [], shape: r };
           texts.push(curText);
         } else if (c.tag === T.PARA_HEADER && curText) curText.paras.push(c);
         if (c.tag !== T.PARA_HEADER) visit(c);
@@ -678,6 +695,47 @@ class HwpConverter {
       return [];
     }
     const blocks: JNode[] = [];
+    if (texts.length) {
+      // 글상자: 도형(또는 그림을 배경으로 한 상자) 안의 문단들
+      const st = shapeRec && !pics.length ? shapeStyle(shapeRec) : { borderColor: null, borderWidth: null, bg: null };
+      const bgImage = pics.length === 1 ? this.pictureSrc(pics[0]) : null;
+      let radius: string | null = null;
+      if (ellipse) radius = '50%';
+      else if (rectRec) {
+        const ratio = u8(rectRec, 0);
+        if (ratio > 0 && w && h) radius = `${Math.round((Math.min(w, h) * Math.min(50, ratio)) / 200)}px`;
+      }
+      // 묶음(그룹) 개체 안에 글상자가 여럿이면(예: 제목 탭 + 본문) 한 상자에 차례로 넣는다.
+      // 여백은 문단이 가장 많은 글상자(본문)의 것을 쓴다.
+      const main = texts.reduce((a, b) => (b.paras.length > a.paras.length ? b : a), texts[0]);
+      // LIST_HEADER(글상자): 문단 수(2) 속성(4) 예비(2) 왼쪽·오른쪽·위·아래 여백(각 2)
+      const hd = main.header;
+      const padding = hd.data.length >= 16 ? [u16(hd, 12), u16(hd, 10), u16(hd, 14), u16(hd, 8)].map((v) => Math.round(hwpToPx(v))) : null;
+      const content: JNode[] = [];
+      const groupW = u32(ctrl, 16);
+      for (const t of texts) {
+        const paras = this.convertParagraphs(t.paras, true);
+        // 묶음 안의 작은 글상자(제목 탭 등)는 그 가로 자리만큼 양쪽 여백을 줘서 원래 자리에 글이 오게 한다
+        if (t !== main && texts.length > 1 && t.shape.tag === T.SHAPE_COMPONENT) {
+          const base = shapeBase(t.shape);
+          const x = i32(t.shape, base);
+          const sw = i32(t.shape, base + 20);
+          if (x >= 0 && sw > 0 && x + sw <= groupW && sw < groupW * 0.9) {
+            const l = hwpToPt(x);
+            const rgt = hwpToPt(groupW - x - sw);
+            for (const n of paras) if (n.type === 'paragraph') n.attrs = { ...n.attrs, indentLeft: (n.attrs?.indentLeft || 0) + l, indentRight: (n.attrs?.indentRight || 0) + rgt };
+          }
+        }
+        content.push(...paras);
+      }
+      blocks.push({
+        type: 'textBox',
+        attrs: { width: w || null, height: h || null, bg: st.bg, bgImage, borderColor: st.borderColor, borderWidth: st.borderWidth, radius, padding },
+        content: content.length ? content : [paragraph()],
+      });
+      if (pics.length > 1) for (const p of pics) blocks.push(paragraph({ textAlign: 'center' }, [this.picture(p, w, h)]));
+      return blocks;
+    }
     for (const p of pics) {
       const sw = Math.round(hwpToPx(Math.abs(i32(p, 20) - i32(p, 12)))) || w;
       const sh = Math.round(hwpToPx(Math.abs(i32(p, 32) - i32(p, 16)))) || h;
@@ -685,6 +743,11 @@ class HwpConverter {
     }
     for (const t of texts) blocks.push(...this.convertParagraphs(t.paras, true));
     return blocks;
+  }
+
+  /** 그림 개체의 데이터 URL (없으면 null) */
+  private pictureSrc(p: Rec): string | null {
+    return this.images.get(u16(p, 71)) || null;
   }
 
   private picture(p: Rec, w: number, h: number): JNode {
@@ -857,4 +920,39 @@ export async function readHwp(data: Uint8Array): Promise<LoadedDoc> {
   }
   while (blocks.length && blocks[0].type === 'pageBreak') blocks.shift();
   return { content: docNode(blocks), settings: conv.settings, meta: {}, warnings: [...new Set(warnings)].slice(0, 20) };
+}
+
+/**
+ * SHAPE_COMPONENT(그리기 개체 공통)에서 선·채우기 정보.
+ * 공통 부분(id 2개, 위치, 크기, 뒤집기, 회전, 렌더링 행렬 cnt 개) 뒤에 선 정보(색 4, 굵기 4, 속성 4)와 채우기 정보(종류 4, 색 4 …)가 온다.
+ */
+/** SHAPE_COMPONENT 의 공통 정보 시작 위치: 최상위 개체는 ctrl ID 를 두 번 쓰고(8), 묶음 안의 개체는 한 번 쓴다(4) */
+function shapeBase(sc: Rec): number {
+  return u32(sc, 0) === u32(sc, 4) ? 8 : 4;
+}
+
+function shapeStyle(sc: Rec): { borderColor: string | null; borderWidth: number | null; bg: string | null } {
+  const none = { borderColor: null, borderWidth: null, bg: null };
+  const base = shapeBase(sc);
+  // base 뒤: x(4) y(4) 그룹(2) 버전(2) 원래 폭·높이(8) 현재 폭·높이(8) 뒤집기(4) 회전각(2) 회전 중심(8) → 행렬 수(2), 행렬들
+  const cnt = u16(sc, base + 42);
+  if (cnt > 16) return none;
+  const off = base + 44 + 48 + 96 * cnt;
+  if (sc.data.length < off + 16) return none;
+  const lineColor = u32(sc, off);
+  const lineW = i32(sc, off + 4);
+  const fillType = u32(sc, off + 12);
+  let borderColor: string | null = null;
+  let borderWidth: number | null = null;
+  if (lineW > 0 && (lineColor & 0xff000000) === 0) {
+    borderColor = colorRefToHex(lineColor);
+    // 굵기 단위가 HWPUNIT(1/7200in)인지 0.01mm 인지 문서마다 달라 보여, 화면용으로 좁은 범위로 잘라 쓴다
+    borderWidth = Math.max(0.75, Math.min(6, lineW < 100 ? lineW * 0.0378 : hwpToPx(lineW)));
+  }
+  let bg: string | null = null;
+  if (fillType & 1 && sc.data.length >= off + 20) {
+    const face = u32(sc, off + 16);
+    if (face !== 0xffffffff && (face & 0xff000000) === 0) bg = colorRefToHex(face);
+  }
+  return { borderColor, borderWidth, bg };
 }

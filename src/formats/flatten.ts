@@ -37,8 +37,18 @@ export interface ParaStyle {
   breakChar: boolean;
 }
 
+/** 탭 하나의 정보 (한글 문서의 탭은 폭·채움·종류를 가진다) */
+export interface TabInfo {
+  /** 탭이 차지하는 폭(px). 모르면 null → 기본 탭 간격 */
+  width: number | null;
+  /** 채움 종류 (0 없음, 1 실선, 2 긴 점선, 3 점선, 4 -.-, 5 -..-, 6 원점선, 7 이중선) */
+  leader: number;
+  /** 탭 종류 (한글 값 그대로) */
+  type: number;
+}
+
 export type FlatInline =
-  | { type: 'text'; text: string; style: CharStyle; link: string | null }
+  | { type: 'text'; text: string; style: CharStyle; link: string | null; tab?: TabInfo | null }
   | { type: 'break' }
   | { type: 'image'; src: string; width: number | null; height: number | null; style: CharStyle; crop: { t: number; r: number; b: number; l: number } | null }
   | { type: 'footnote'; text: string; style: CharStyle };
@@ -81,7 +91,40 @@ export interface FlatTable {
   rowHeightsPx: (number | null)[];
 }
 
-export type FlatBlock = FlatPara | FlatTable;
+/** 글상자 (도형 안의 문단들) */
+export interface FlatBox {
+  kind: 'box';
+  width: number | null;
+  height: number | null;
+  bg: string | null;
+  bgImage: string | null;
+  borderColor: string | null;
+  borderWidth: number | null;
+  /** CSS border-radius 값 ('12px', '50%') */
+  radius: string | null;
+  /** 안쪽 여백 px [위, 오른쪽, 아래, 왼쪽] */
+  padding: number[] | null;
+  blocks: FlatBlock[];
+  pageBreakBefore: boolean;
+}
+
+export type FlatBlock = FlatPara | FlatTable | FlatBox;
+
+/** 글상자를 지원하지 않는 형식을 위해 상자를 풀어 안의 블록만 남긴다 (표 안까지) */
+export function unwrapBoxes(blocks: FlatBlock[]): FlatBlock[] {
+  const out: FlatBlock[] = [];
+  for (const b of blocks) {
+    if (b.kind === 'box') {
+      const inner = unwrapBoxes(b.blocks);
+      if (inner.length && b.pageBreakBefore) inner[0].pageBreakBefore = true;
+      out.push(...inner);
+    } else if (b.kind === 'table') {
+      for (const row of b.cells) for (const c of row) c.blocks = unwrapBoxes(c.blocks);
+      out.push(b);
+    } else out.push(b);
+  }
+  return out;
+}
 
 export const HEADING_SIZES = [0, 20, 16, 14, 12, 11, 10];
 
@@ -127,11 +170,15 @@ export function paraKey(p: ParaStyle): string {
   return [p.align, p.indentLeft, p.indentRight, p.textIndent, p.spaceBefore, p.spaceAfter, p.lineHeight, p.bg, +p.borderBottom, +p.breakChar].join('|');
 }
 
-function applyMarks(base: CharStyle, marks: JMark[] | undefined): { style: CharStyle; link: string | null } {
+function applyMarks(base: CharStyle, marks: JMark[] | undefined): { style: CharStyle; link: string | null; tab: TabInfo | null } {
   const s = { ...base };
   let link: string | null = null;
+  let tab: TabInfo | null = null;
   for (const m of marks || []) {
     switch (m.type) {
+      case 'tab':
+        tab = { width: m.attrs?.width ? +m.attrs.width : null, leader: +(m.attrs?.leader || 0), type: +(m.attrs?.type || 0) };
+        break;
       case 'bold':
         s.bold = true;
         break;
@@ -173,7 +220,7 @@ function applyMarks(base: CharStyle, marks: JMark[] | undefined): { style: CharS
       }
     }
   }
-  return { style: s, link };
+  return { style: s, link, tab };
 }
 
 function normalizeHex(c: string): string | null {
@@ -308,6 +355,9 @@ export function flattenBlocks(nodes: JNode[], ctx: Ctx): FlatBlock[] {
       case 'table':
         push(flattenTable(n, ctx));
         break;
+      case 'textBox':
+        push(flattenBox(n, ctx));
+        break;
       default:
         if (n.content) for (const b of flattenBlocks(n.content, ctx)) push(b);
     }
@@ -356,10 +406,11 @@ function flattenPara(n: JNode, ctx: Ctx, level: number): FlatPara {
   const inlines: FlatInline[] = [];
   for (const c of n.content || []) {
     if (c.type === 'text') {
-      const { style: cs, link } = applyMarks(base, c.marks);
+      const { style: cs, link, tab } = applyMarks(base, c.marks);
       const prev = inlines[inlines.length - 1];
-      if (prev && prev.type === 'text' && charKey(prev.style) === charKey(cs) && prev.link === link) prev.text += c.text || '';
-      else inlines.push({ type: 'text', text: c.text || '', style: cs, link });
+      // 탭 정보가 붙은 글자는 따로 둔다 (탭 하나짜리 텍스트)
+      if (!tab && prev && prev.type === 'text' && !prev.tab && charKey(prev.style) === charKey(cs) && prev.link === link) prev.text += c.text || '';
+      else inlines.push({ type: 'text', text: c.text || '', style: cs, link, tab });
     } else if (c.type === 'hardBreak') inlines.push({ type: 'break' });
     else if (c.type === 'image') {
       const { style: cs } = applyMarks(base, c.marks);
@@ -370,6 +421,25 @@ function flattenPara(n: JNode, ctx: Ctx, level: number): FlatPara {
   }
   const firstText = inlines.find((i) => i.type === 'text') as any;
   return { kind: 'para', style, baseChar: firstText ? firstText.style : base, inlines, pageBreakBefore: false };
+}
+
+function flattenBox(n: JNode, ctx: Ctx): FlatBox {
+  const a = n.attrs || {};
+  const num = (v: any) => (Number.isFinite(+v) && +v > 0 ? +v : null);
+  const pad = Array.isArray(a.padding) && a.padding.length === 4 ? a.padding.map((v: any) => Math.max(0, +v || 0)) : null;
+  return {
+    kind: 'box',
+    width: num(a.width),
+    height: num(a.height),
+    bg: normColor(a.bg),
+    bgImage: typeof a.bgImage === 'string' && a.bgImage ? a.bgImage : null,
+    borderColor: normColor(a.borderColor),
+    borderWidth: num(a.borderWidth),
+    radius: typeof a.radius === 'string' && /^[\d.]+(px|%)$/.test(a.radius) ? a.radius : null,
+    padding: pad,
+    blocks: flattenBlocks(n.content || [], ctx),
+    pageBreakBefore: false,
+  };
 }
 
 function flattenTable(n: JNode, ctx: Ctx): FlatTable {

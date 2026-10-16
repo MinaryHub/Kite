@@ -1,18 +1,7 @@
 import JSZip from 'jszip';
 import type { KDocument } from '../../types';
 import { type JNode, mmToHwp, pxToHwp, ptToHwp, xmlEscape, parseBorderCss, normColor, safeIsoDate } from '../common';
-import {
-  type CharStyle,
-  type FlatBlock,
-  type FlatPara,
-  type FlatTable,
-  type ParaStyle,
-  charKey,
-  defaultChar,
-  defaultPara,
-  flattenDoc,
-  paraKey,
-} from '../flatten';
+import { type CharStyle, type FlatBlock, type FlatPara, type FlatTable, type ParaStyle, charKey, defaultChar, defaultPara, flattenDoc, paraKey, type FlatBox } from '../flatten';
 import { prepareImage } from '../imageUtil';
 
 /**
@@ -182,8 +171,10 @@ class SectionWriter {
         ensureRun(this.reg.char(it.style), it.link);
         openT();
         const parts = it.text.split('\t');
+        const tb = it.tab;
+        const tabXml = `<hp:tab width="${tb?.width ? pxToHwp(tb.width) : 4000}" leader="${tb?.leader || 0}" type="${tb ? tb.type : 1}"/>`;
         parts.forEach((part, i) => {
-          if (i) xml += '<hp:tab width="4000" leader="0" type="1"/>';
+          if (i) xml += tabXml;
           if (part) xml += xmlEscape(part);
         });
       } else if (it.type === 'break') {
@@ -288,10 +279,41 @@ class SectionWriter {
     return `<hp:p id="${pid}" paraPrIDRef="${paraId}" styleIDRef="0" pageBreak="${t.pageBreakBefore && !sub ? 1 : 0}" columnBreak="0" merged="0"><hp:run charPrIDRef="0">${xml}<hp:t/></hp:run></hp:p>`;
   }
 
+  /** 글상자 → 사각형 도형(hp:rect) 안의 글 */
+  box(b: FlatBox, sub: boolean): string {
+    const W = Math.max(100, pxToHwp(b.width || 300));
+    const H = Math.max(100, pxToHwp(b.height || 60));
+    const id = nextId();
+    const inner = this.blocks(b.blocks, true) || `<hp:p id="2147483648" paraPrIDRef="0" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="0"/></hp:p>`;
+    const pad = (b.padding || [4, 4, 4, 4]).map((v) => pxToHwp(v));
+    const lineAttrs = `endCap="FLAT" headStyle="NORMAL" tailStyle="NORMAL" headfill="1" tailfill="1" headSz="SMALL_SMALL" tailSz="SMALL_SMALL" outlineStyle="NORMAL" alpha="0"`;
+    const line = b.borderColor
+      ? `<hp:lineShape color="${b.borderColor}" width="${Math.max(1, Math.round((b.borderWidth || 1) / 0.0378))}" style="SOLID" ${lineAttrs}/>`
+      : `<hp:lineShape color="#000000" width="0" style="NONE" ${lineAttrs}/>`;
+    const img = b.bgImage ? this.images.get(b.bgImage) : null;
+    let fill = '';
+    if (img) fill = `<hp:fillBrush><hc:imgBrush mode="STRETCH"><hc:img binaryItemIDRef="${img.id}" bright="0" contrast="0" effect="REAL_PIC" alpha="0"/></hc:imgBrush></hp:fillBrush>`;
+    else if (b.bg) fill = `<hp:fillBrush><hc:winBrush faceColor="${b.bg}" hatchColor="#FF000000" alpha="0"/></hp:fillBrush>`;
+    const ratio = b.radius && b.radius.endsWith('px') && b.width && b.height ? Math.min(50, Math.round((parseFloat(b.radius) * 200) / Math.min(b.width, b.height))) : b.radius === '50%' ? 50 : 0;
+    const xml =
+      `<hp:rect id="${id}" zOrder="${this.zOrder++}" numberingType="PICTURE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" href="" groupLevel="0" instid="${id - 1}" ratio="${ratio}">` +
+      `<hp:offset x="0" y="0"/><hp:orgSz width="${W}" height="${H}"/><hp:curSz width="${W}" height="${H}"/><hp:flip horizontal="0" vertical="0"/><hp:rotationInfo angle="0" centerX="${Math.round(W / 2)}" centerY="${Math.round(H / 2)}" rotateimage="1"/>` +
+      `<hp:renderingInfo><hc:transMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/><hc:scaMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/><hc:rotMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/></hp:renderingInfo>` +
+      line +
+      fill +
+      `<hp:drawText lastWidth="${W}" name="" editable="0"><hp:textMargin left="${pad[3]}" right="${pad[1]}" top="${pad[0]}" bottom="${pad[2]}"/>${this.subList(inner, 'TOP', Math.max(0, W - pad[1] - pad[3]), Math.max(0, H - pad[0] - pad[2]))}</hp:drawText>` +
+      `<hp:sz width="${W}" widthRelTo="ABSOLUTE" height="${H}" heightRelTo="ABSOLUTE" protect="0"/>` +
+      `<hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/>` +
+      `<hp:outMargin left="0" right="0" top="0" bottom="0"/><hc:pt0 x="0" y="0"/><hc:pt1 x="${W}" y="0"/><hc:pt2 x="${W}" y="${H}"/><hc:pt3 x="0" y="${H}"/></hp:rect>`;
+    const paraId = this.reg.para(defaultPara());
+    return `<hp:p id="${sub ? '2147483648' : '0'}" paraPrIDRef="${paraId}" styleIDRef="0" pageBreak="${b.pageBreakBefore && !sub ? 1 : 0}" columnBreak="0" merged="0"><hp:run charPrIDRef="0">${xml}<hp:t/></hp:run></hp:p>`;
+  }
+
   blocks(blocks: FlatBlock[], sub: boolean, firstExtra?: (p: FlatPara) => string): string {
     let xml = '';
     blocks.forEach((b, i) => {
       if (b.kind === 'para') xml += this.paragraph(b, { sub, first: !sub && i === 0 && !!firstExtra });
+      else if (b.kind === 'box') xml += this.box(b, sub);
       else xml += this.table(b, sub);
     });
     return xml;
@@ -461,6 +483,9 @@ function collectImageSrcs(blocks: FlatBlock[], out: Set<string>) {
   for (const b of blocks) {
     if (b.kind === 'para') {
       for (const i of b.inlines) if (i.type === 'image' && i.src) out.add(i.src);
+    } else if (b.kind === 'box') {
+      if (b.bgImage) out.add(b.bgImage);
+      collectImageSrcs(b.blocks, out);
     } else for (const row of b.cells) for (const c of row) collectImageSrcs(c.blocks, out);
   }
 }
@@ -471,6 +496,7 @@ function previewText(blocks: FlatBlock[]): string {
     for (const b of bs) {
       if (lines.join('\n').length > 1000) return;
       if (b.kind === 'para') lines.push(b.inlines.map((i) => (i.type === 'text' ? i.text : '')).join(''));
+      else if (b.kind === 'box') walk(b.blocks);
       else for (const row of b.cells) lines.push(row.map((c) => `<${c.blocks.map((x) => (x.kind === 'para' ? x.inlines.map((i) => (i.type === 'text' ? i.text : '')).join('') : '')).join(' ')}>`).join(''));
     }
   };
@@ -512,6 +538,7 @@ export async function writeHwpx(doc: KDocument, opts: { pageCount?: number } = {
   let body = '';
   blocks.forEach((b, i) => {
     if (b.kind === 'para') body += sw.paragraph(b, { sub: false, first: i === 0 });
+    else if (b.kind === 'box') body += sw.box(b, false);
     else body += sw.table(b, false);
   });
   const section = XML_DECL + `<hs:sec ${NS}>${body}</hs:sec>`;
