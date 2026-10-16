@@ -255,7 +255,8 @@ function paraShapeRec(p: ParaStyle & { bf: number }): Uint8Array {
     lsType = 1;
     lsVal = ptToHwp(parseFloat(p.lineHeight)) * 2;
   } else if (p.lineHeight) lsVal = Math.round(parseFloat(p.lineHeight) * 100) || 160;
-  const attr1 = 0x180 | ((ALIGN[p.align] ?? 0) << 2) | (lsType === 1 ? 1 : 0);
+  // bit 7: 한글 줄 나눔 단위 (0 어절, 1 글자), bit 8: 편집 용지 줄 격자
+  const attr1 = 0x100 | (p.breakChar ? 0x80 : 0) | ((ALIGN[p.align] ?? 0) << 2) | (lsType === 1 ? 1 : 0);
   b.u32(attr1);
   // 여백 값은 2배로 저장
   b.i32(ptToHwp(p.indentLeft) * 2);

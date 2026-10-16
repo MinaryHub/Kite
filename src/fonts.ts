@@ -50,15 +50,18 @@ export const FONT_SIZES = [8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 26,
 
 const SERIF_RE = /바탕|명조|궁서|신명|Batang|Myeongjo|Gungsuh|serif|Times|Georgia|Cambria|Garamond|Mincho|Song|Ming|윤명조|한양신|본명조/i;
 
+const SANS_RE = /고딕|돋움|굴림|헤드라인|그래픽|Gothic|Dotum|Gulim|Sans|Arial|Helvetica|Verdana|Tahoma|Segoe|Calibri|Malgun|맑은|나눔스퀘어|Pretendard|Noto Sans|Roboto|Inter/i;
+
 /** 설치되지 않은 글꼴을 위한 대체 글꼴 목록 (한글처럼 명조/고딕 계열 유지) */
 export function fontStack(name: string): string {
   // 문서에서 온 글꼴 이름이므로 CSS 구문을 바꿀 수 있는 문자는 모두 제거
   const safe = name.replace(/[\u0000-\u001f\u007f'"\\;:{}()<>@[\]]/g, '').trim().slice(0, 80) || '함초롬바탕';
   const q = `'${safe}'`;
   if (/D2Coding|Consolas|Courier|Mono|코딩/i.test(name)) return `${q}, D2Coding, Consolas, monospace`;
-  return SERIF_RE.test(name)
-    ? `${q}, '함초롬바탕', 'HCR Batang', '휴먼명조', '바탕', Batang, serif, 'Segoe UI Symbol', Wingdings`
-    : `${q}, '함초롬돋움', 'HCR Dotum', '맑은 고딕', 'Malgun Gothic', sans-serif, 'Segoe UI Symbol', Wingdings`;
+  // 한글은 설치되지 않은 글꼴을 기본 글꼴(함초롬바탕)로 보여 준다. 이름이 분명히 고딕 계열일 때만 고딕으로 대신한다
+  return SANS_RE.test(name) && !SERIF_RE.test(name)
+    ? `${q}, '함초롬돋움', 'HCR Dotum', '맑은 고딕', 'Malgun Gothic', sans-serif, 'Segoe UI Symbol', Wingdings`
+    : `${q}, '함초롬바탕', 'HCR Batang', '휴먼명조', '바탕', Batang, serif, 'Segoe UI Symbol', Wingdings`;
 }
 
 export function cssFontFamily(name: string): string {

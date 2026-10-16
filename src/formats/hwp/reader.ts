@@ -282,6 +282,8 @@ function parseDocInfo(recs: Rec[]): DocInfo {
           headingLevel: (a1 >>> 25) & 7,
           pageBreakBefore: false,
           bg: bfId ? info.borderFills[bfId - 1]?.bg || null : null,
+          // 속성1 bit 7: 줄 나눔 기준 한글 단위 (0 어절, 1 글자)
+          breakChar: ((a1 >>> 7) & 1) === 1,
         });
         break;
       }

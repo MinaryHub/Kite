@@ -128,6 +128,13 @@ export const ParagraphFormat = Extension.create({
             },
             renderHTML: (attrs: Record<string, any>) => (attrs.spaceAfter ? { style: `padding-bottom: ${attrs.spaceAfter}pt` } : {}),
           },
+          /** 한글 줄 나눔 단위: 글자 (한글의 '줄 나눔 기준 - 한글 단위: 글자'). 기본은 어절 */
+          breakChar: {
+            default: null,
+            parseHTML: (el: HTMLElement) => (el.getAttribute('data-break') === 'char' ? true : null),
+            // normal: 한글은 글자 사이 어디서나 나누고 영어 낱말은 지킨다 (break-all 은 영어 낱말도 자른다)
+            renderHTML: (attrs: Record<string, any>) => (attrs.breakChar ? { 'data-break': 'char', style: 'word-break: normal' } : {}),
+          },
           paraBg: {
             default: null,
             parseHTML: (el: HTMLElement) => normColor(el.getAttribute('data-bg')),

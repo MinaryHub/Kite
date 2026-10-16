@@ -415,7 +415,7 @@ function headerXml(reg: Registry): string {
       return (
         `<hh:paraPr id="${i}" tabPrIDRef="0" condense="0" fontLineHeight="0" snapToGrid="1" suppressLineNumbers="0" checked="0">` +
         `<hh:align horizontal="${hwpAlign(p.align)}" vertical="BASELINE"/><hh:heading type="NONE" idRef="0" level="0"/>` +
-        `<hh:breakSetting breakLatinWord="KEEP_WORD" breakNonLatinWord="KEEP_WORD" widowOrphan="0" keepWithNext="0" keepLines="0" pageBreakBefore="0" lineWrap="BREAK"/>` +
+        `<hh:breakSetting breakLatinWord="KEEP_WORD" breakNonLatinWord="${p.breakChar ? 'KEEP_WORD' : 'BREAK_WORD'}" widowOrphan="0" keepWithNext="0" keepLines="0" pageBreakBefore="0" lineWrap="BREAK"/>` +
         `<hh:autoSpacing eAsianEng="0" eAsianNum="0"/>` +
         `<hh:margin>${m('intent', p.textIndent)}${m('left', p.indentLeft)}${m('right', p.indentRight)}${m('prev', p.spaceBefore)}${m('next', p.spaceAfter)}</hh:margin>` +
         `<hh:lineSpacing type="${lsType}" value="${lsVal}" unit="HWPUNIT"/>` +

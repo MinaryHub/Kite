@@ -33,6 +33,8 @@ export interface ParaStyle {
   bg: string | null;
   borderBottom: boolean;
   heading: number; // 0 = 본문
+  /** 한글 줄 나눔 단위가 글자 */
+  breakChar: boolean;
 }
 
 export type FlatInline =
@@ -113,6 +115,7 @@ export function defaultPara(): ParaStyle {
     bg: null,
     borderBottom: false,
     heading: 0,
+    breakChar: false,
   };
 }
 
@@ -121,7 +124,7 @@ export function charKey(c: CharStyle): string {
 }
 
 export function paraKey(p: ParaStyle): string {
-  return [p.align, p.indentLeft, p.indentRight, p.textIndent, p.spaceBefore, p.spaceAfter, p.lineHeight, p.bg, +p.borderBottom].join('|');
+  return [p.align, p.indentLeft, p.indentRight, p.textIndent, p.spaceBefore, p.spaceAfter, p.lineHeight, p.bg, +p.borderBottom, +p.breakChar].join('|');
 }
 
 function applyMarks(base: CharStyle, marks: JMark[] | undefined): { style: CharStyle; link: string | null } {
@@ -339,6 +342,7 @@ function flattenPara(n: JNode, ctx: Ctx, level: number): FlatPara {
   style.spaceAfter = a.spaceAfter || 0;
   style.bg = normColor(a.paraBg);
   style.heading = level;
+  style.breakChar = !!a.breakChar;
   const base: CharStyle = { ...ctx.baseChar };
   if (level) {
     base.size = HEADING_SIZES[level] || 10;

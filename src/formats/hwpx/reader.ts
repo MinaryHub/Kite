@@ -65,6 +65,8 @@ export interface ParaPr {
   headingLevel: number;
   pageBreakBefore: boolean;
   bg?: string | null;
+  /** 한글 줄 나눔 단위가 글자 (기본은 어절) */
+  breakChar?: boolean;
 }
 
 export interface BorderFill {
@@ -244,6 +246,9 @@ export function parseHeader(doc: Document): HeaderInfo {
       headingLevel: numAttr(heading, 'level', 0),
       pageBreakBefore: attr(brk, 'pageBreakBefore') === '1',
       bg: bfId ? info.borderFills.get(bfId)?.bg || null : null,
+      // 이름과 달리 한글은 KEEP_WORD 를 '글자' 단위(한글 기본값), BREAK_WORD 를 '어절' 단위로 쓴다
+      // (한글이 저장한 줄 위치 lineseg 로 확인: KEEP_WORD 문단은 낱말 중간에서 줄이 바뀐다)
+      breakChar: (attr(brk, 'breakNonLatinWord') || 'KEEP_WORD') === 'KEEP_WORD',
     });
   }
 
@@ -301,6 +306,7 @@ export function paraAttrs(pp: ParaPr | undefined): Record<string, any> {
   if (pp.spaceBefore) a.spaceBefore = round(pp.spaceBefore);
   if (pp.spaceAfter) a.spaceAfter = round(pp.spaceAfter);
   if (pp.bg) a.paraBg = pp.bg;
+  if (pp.breakChar) a.breakChar = true;
   return a;
 }
 
