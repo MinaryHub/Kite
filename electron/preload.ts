@@ -43,6 +43,7 @@ const api = {
   mcpStatus: (): Promise<any> => ipcRenderer.invoke('mcp:status'),
   mcpSet: (patch: { enabled?: boolean; confirmEdits?: boolean; allowed?: string[] }): Promise<any> => ipcRenderer.invoke('mcp:set', patch),
   mcpRegisterClaude: (): Promise<{ ok: boolean; message: string }> => ipcRenderer.invoke('mcp:register-claude'),
+  mcpOpenClaude: (): Promise<boolean> => ipcRenderer.invoke('mcp:open-claude'),
   onMcpCall: (cb: (call: any) => void) => {
     const h = (_e: unknown, call: any) => cb(call);
     ipcRenderer.on('mcp:call', h);

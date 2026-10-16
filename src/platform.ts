@@ -224,6 +224,7 @@ export const platform = {
     status: () => (api ? api.mcpStatus() : Promise.resolve(null)),
     set: (patch: { enabled?: boolean; confirmEdits?: boolean; allowed?: string[] }) => (api ? api.mcpSet(patch) : Promise.resolve(null)),
     registerClaude: () => (api ? api.mcpRegisterClaude() : Promise.resolve({ ok: false, message: '데스크톱 앱에서만 쓸 수 있습니다.' })),
+    openClaude: (): Promise<boolean> => (api ? api.mcpOpenClaude() : Promise.resolve(false)),
     onCall: (cb: (call: any) => void) => (api ? api.onMcpCall(cb) : () => {}),
     result: (r: { callId: string; ok: boolean; text: string }) => api?.mcpResult(r),
     ready: () => api?.mcpReady(),

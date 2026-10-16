@@ -1450,3 +1450,120 @@ input[type='number'] {
 .ai-config .row .unit {
   white-space: nowrap;
 }
+
+/* ----- AI 도우미: 방식 전환 / Claude 데스크톱 ----- */
+.ai-mode {
+  padding: 8px 10px 0;
+}
+.ai-mode .seg {
+  display: flex;
+}
+.ai-mode .seg button {
+  flex: 1;
+  justify-content: center;
+}
+.ai-desk {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+}
+.ai-desk-status {
+  margin: 8px 10px 0;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: #fff6e0;
+  color: #7a5200;
+  line-height: 1.5;
+}
+.ai-desk-status.ok {
+  background: #e6f4ea;
+  color: #1e6b34;
+}
+.ai-desk-sec {
+  padding: 10px;
+  border-bottom: 1px solid var(--c-border);
+}
+.ai-desk-sec.grow {
+  flex: 1;
+}
+.ai-desk-h {
+  font-weight: 600;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+}
+.ai-step {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.ai-step:last-child {
+  margin-bottom: 0;
+}
+.ai-step-mark {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--c-border-strong);
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  color: var(--c-text-dim);
+  background: #fff;
+}
+.ai-step.done .ai-step-mark {
+  background: #2e9d52;
+  border-color: #2e9d52;
+  color: #fff;
+}
+.ai-step-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.ai-step-title {
+  font-weight: 600;
+  line-height: 20px;
+}
+.ai-desk-msg {
+  color: var(--c-accent);
+  line-height: 1.5;
+}
+.ai-desk-msg.err {
+  color: #c0392b;
+}
+.ai-log {
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  column-gap: 6px;
+  padding: 4px 0;
+  border-top: 1px dashed var(--c-border);
+}
+.ai-log-time {
+  color: var(--c-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.ai-log.edit .ai-log-what {
+  color: var(--c-accent);
+}
+.ai-log.err .ai-log-what {
+  color: #c0392b;
+}
+.ai-log-detail {
+  grid-column: 2;
+  color: var(--c-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-desk-foot {
+  padding: 8px 10px;
+  line-height: 1.5;
+}

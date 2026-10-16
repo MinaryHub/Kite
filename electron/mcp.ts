@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -372,7 +372,18 @@ export function initMcpHost(win: () => BrowserWindow | null) {
     command: bridgeCommand(),
     claudeConfig: claudeConfigPath(),
     claudeRegistered: isClaudeRegistered(),
+    claudeInstalled: isClaudeInstalled(),
   }));
+  // Claude 데스크톱 열기: claude:// 주소만 연다 (다른 주소는 받지 않는다)
+  ipcMain.handle('mcp:open-claude', async () => {
+    if (!isClaudeInstalled()) return false;
+    try {
+      await shell.openExternal('claude://');
+      return true;
+    } catch {
+      return false;
+    }
+  });
   ipcMain.handle('mcp:set', (_e, patch: Partial<McpConfig>) => {
     if (patch && typeof patch.enabled === 'boolean') cfg.enabled = patch.enabled;
     if (patch && typeof patch.confirmEdits === 'boolean') cfg.confirmEdits = patch.confirmEdits;
@@ -401,6 +412,15 @@ function bridgeCommand(): { command: string; args: string[] } {
 }
 function claudeConfigPath(): string {
   return path.join(app.getPath('appData'), 'Claude', 'claude_desktop_config.json');
+}
+/** Claude 데스크톱 설치 여부: claude:// 주소 처리기 또는 설정 폴더 */
+function isClaudeInstalled(): boolean {
+  try {
+    if (app.getApplicationNameForProtocol('claude://')) return true;
+  } catch {
+    /* 무시 */
+  }
+  return fs.existsSync(path.dirname(claudeConfigPath()));
 }
 function isClaudeRegistered(): boolean {
   try {

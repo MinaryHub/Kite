@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { renderMarkdown } from './aiMarkdown';
+import { AiDesktopPanel } from './AiDesktopPanel';
 import { useApp } from '../app/hooks';
 import { app } from '../app/controller';
 import { Icon } from './Icon';
@@ -98,6 +99,8 @@ export function AiPanel() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [showKeys, setShowKeys] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
+  // 'desktop': Claude 데스크톱(구독 계정, MCP) / 'api': API 키로 직접 대화
+  const [mode, setMode] = useState<'desktop' | 'api' | null>(() => (lsGet('mode', '') as any) || null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -203,6 +206,13 @@ export function AiPanel() {
     app.toast(replace ? '선택 영역을 바꾸었습니다.' : '문서에 넣었습니다.');
   };
 
+  // 처음에는 API 키가 하나도 없으면 Claude 데스크톱 방식을 기본으로
+  const effMode: 'desktop' | 'api' = mode || (keys && (['claude', 'openai', 'gemini'] as Provider[]).some((p) => keys[p] !== 'none') ? 'api' : 'desktop');
+  const chooseMode = (m: 'desktop' | 'api') => {
+    setMode(m);
+    lsSet('mode', m);
+  };
+
   const pname = (p?: Provider) => PROVIDERS.find((x) => x.id === p)?.label || '';
   const hasSel = !!app.active && !app.active.editor.state.selection.empty;
 
@@ -211,16 +221,34 @@ export function AiPanel() {
       <div className="ai-head">
         <b>AI 도우미</b>
         <span style={{ flex: 1 }} />
-        <button className="tb-btn" title="대화 지우기" onClick={() => setMsgs([])} disabled={!!busyId}>
-          <Icon name="Trash2" size={14} />
-        </button>
-        <button className="tb-btn" title="API 키 설정" onClick={() => setShowKeys(true)}>
-          <Icon name="Settings" size={14} />
-        </button>
+        {effMode === 'api' && (
+          <>
+            <button className="tb-btn" title="대화 지우기" onClick={() => setMsgs([])} disabled={!!busyId}>
+              <Icon name="Trash2" size={14} />
+            </button>
+            <button className="tb-btn" title="API 키 설정" onClick={() => setShowKeys(true)}>
+              <Icon name="Settings" size={14} />
+            </button>
+          </>
+        )}
         <button className="tb-btn" title="닫기" onClick={() => app.set({ aiOpen: false })}>
           <Icon name="X" size={14} />
         </button>
       </div>
+      <div className="ai-mode">
+        <span className="seg">
+          <button className={effMode === 'desktop' ? 'on' : ''} onClick={() => chooseMode('desktop')} title="Claude 데스크톱 앱의 로그인(구독)으로 쓰기 — API 키 필요 없음">
+            Claude 데스크톱 (구독)
+          </button>
+          <button className={effMode === 'api' ? 'on' : ''} onClick={() => chooseMode('api')} title="API 키로 Kite 안에서 바로 대화">
+            API 키
+          </button>
+        </span>
+      </div>
+      {effMode === 'desktop' ? (
+        <AiDesktopPanel />
+      ) : (
+        <>
       <div className="ai-config">
         <span className="seg">
           {PROVIDERS.map((p) => (
@@ -367,6 +395,8 @@ ${href.slice(0, 500)}
           </button>
         )}
       </div>
+        </>
+      )}
       {showKeys && (
         <AiKeysDialog
           keys={keys}

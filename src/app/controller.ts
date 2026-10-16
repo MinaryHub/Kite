@@ -92,6 +92,8 @@ export class AppController {
   findOpen: 'find' | 'replace' | null = null;
   previewOpen = false;
   aiOpen = false;
+  /** AI 앱(MCP)이 한 작업 기록 (최근 것이 앞) */
+  mcpLog: { time: number; client: string; tool: string; title: string; ok: boolean; edits: boolean; detail: string }[] = [];
   toasts: Toast[] = [];
   busy: string | null = null;
   recent: string[] = [];

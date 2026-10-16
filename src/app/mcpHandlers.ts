@@ -305,6 +305,13 @@ export function installMcpHandlers() {
         if (!(e instanceof ToolError)) console.error('[mcp]', e);
       }
       platform.mcp.result({ callId: call.callId, ok, text });
+      // 패널에 보여 줄 작업 기록
+      const def = MCP_TOOLS.find((t) => t.name === call.name);
+      app.mcpLog = [
+        { time: Date.now(), client: call.client || 'AI 앱', tool: call.name, title: def?.title || call.name, ok, edits: !!def?.edits, detail: text.split('\n')[0].slice(0, 120) },
+        ...app.mcpLog,
+      ].slice(0, 30);
+      app.emit();
     });
   });
 }
