@@ -1,7 +1,7 @@
 import JSZip from 'jszip';
 import type { KDocument } from '../../types';
 import { type JNode, mmToTwip, xmlEscape, parseBorderCss, normColor, safeIsoDate } from '../common';
-import { type CharStyle, type FlatBlock, type FlatPara, type FlatTable, type ParaStyle, flattenDoc } from '../flatten';
+import { type CharStyle, type FlatBlock, type FlatInline, type FlatPara, type FlatTable, type ParaStyle, flattenDoc } from '../flatten';
 import { prepareImage } from '../imageUtil';
 
 /** DOCX 쓰기 (Word 2010 이상 호환) */
@@ -23,6 +23,14 @@ class Ctx {
   footnotes: string[] = [];
   docPrId = 1;
   bodyWidthTw = 9000;
+  /** 변경 내용(w:ins/w:del) 번호 */
+  changeNo = 1;
+  /** 메모 id → Word 메모 번호 */
+  commentNo = new Map<string, number>();
+  /** 메모가 시작된 것 */
+  commentOpen = new Set<string>();
+  /** 메모마다 마지막으로 달린 글자 (그 뒤에서 범위를 닫는다) */
+  commentLast = new Map<string, FlatInline>();
 
   addRel(type: string, target: string, external = false): string {
     const id = `rId${++this.relNo}`;
@@ -42,7 +50,8 @@ function rPr(c: CharStyle, extra = ''): string {
   if (c.effect === 'emboss') x += '<w:emboss/>';
   if (c.effect === 'engrave') x += '<w:imprint/>';
   if (c.color && c.color !== '#000000') x += `<w:color w:val="${hex(c.color)}"/>`;
-  if (c.letterSpacing) x += `<w:spacing w:val="${Math.round(((c.size * c.letterSpacing) / 100) * 20)}"/>`;
+  // Word 의 자간 범위(±1584pt)를 넘지 않게
+  if (c.letterSpacing) x += `<w:spacing w:val="${Math.max(-31680, Math.min(31680, Math.round(((c.size * c.letterSpacing) / 100) * 20)))}"/>`;
   if (c.fontWidth && c.fontWidth !== 100) x += `<w:w w:val="${Math.round(c.fontWidth)}"/>`;
   x += `<w:sz w:val="${Math.round(c.size * 2)}"/><w:szCs w:val="${Math.round(c.size * 2)}"/>`;
   if (c.underline) x += '<w:u w:val="single"/>';
@@ -76,14 +85,62 @@ function pPr(p: ParaStyle, pageBreak: boolean, markChar?: CharStyle): string {
   return x + '</w:pPr>';
 }
 
-function textRuns(text: string, c: CharStyle): string {
+function textRuns(text: string, c: CharStyle, deleted = false): string {
   const parts = text.split('\t');
   let inner = '';
+  const tag = deleted ? 'w:delText' : 'w:t';
   parts.forEach((part, i) => {
     if (i) inner += '<w:tab/>';
-    if (part) inner += `<w:t xml:space="preserve">${xmlEscape(part)}</w:t>`;
+    if (part) inner += `<${tag} xml:space="preserve">${xmlEscape(part)}</${tag}>`;
   });
   return `<w:r>${rPr(c)}${inner}</w:r>`;
+}
+
+const isoTime = (t: number) => (t > 0 ? new Date(t).toISOString().replace(/\.\d+Z$/, 'Z') : new Date().toISOString().replace(/\.\d+Z$/, 'Z'));
+
+/** 글자 조각: 변경 내용이면 w:ins / w:del 로 감싼다 */
+function reviewedRun(ctx: Ctx, it: Extract<FlatInline, { type: 'text' }>): string {
+  const ch = it.review?.change;
+  if (!ch) return textRuns(it.text, it.style);
+  const tag = ch.type === 'ins' ? 'w:ins' : 'w:del';
+  return `<${tag} w:id="${ctx.changeNo++}" w:author="${xmlEscape(ch.author || 'Kite')}" w:date="${isoTime(ch.time)}">${textRuns(it.text, it.style, ch.type === 'del')}</${tag}>`;
+}
+
+/** 메모 범위 시작/끝 (메모는 여러 문단에 걸칠 수 있다) */
+function commentStarts(ctx: Ctx, it: FlatInline): string {
+  let x = '';
+  for (const id of (it.type === 'text' && it.review?.comments) || []) {
+    const n = ctx.commentNo.get(id);
+    if (n == null || ctx.commentOpen.has(id)) continue;
+    ctx.commentOpen.add(id);
+    x += `<w:commentRangeStart w:id="${n}"/>`;
+  }
+  return x;
+}
+function commentEnds(ctx: Ctx, it: FlatInline): string {
+  let x = '';
+  for (const id of (it.type === 'text' && it.review?.comments) || []) {
+    const n = ctx.commentNo.get(id);
+    if (n == null || ctx.commentLast.get(id) !== it) continue;
+    x += `<w:commentRangeEnd w:id="${n}"/><w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:commentReference w:id="${n}"/></w:r>`;
+  }
+  return x;
+}
+
+/** 메모가 달린 글자들을 훑어 번호와 마지막 글자를 정한다 */
+function collectComments(ctx: Ctx, blocks: FlatBlock[], known: Record<string, unknown>) {
+  for (const b of blocks) {
+    if (b.kind === 'para') {
+      for (const i of b.inlines)
+        if (i.type === 'text')
+          for (const id of i.review?.comments || []) {
+            if (!known[id]) continue;
+            if (!ctx.commentNo.has(id)) ctx.commentNo.set(id, ctx.commentNo.size);
+            ctx.commentLast.set(id, i);
+          }
+    } else if (b.kind === 'box') collectComments(ctx, b.blocks, known);
+    else for (const row of b.cells) for (const c of row) collectComments(ctx, c.blocks, known);
+  }
 }
 
 function drawing(ctx: Ctx, info: { rid: string; w: number; h: number; name: string }, wPx: number | null, hPx: number | null, crop: { t: number; r: number; b: number; l: number } | null = null): string {
@@ -125,7 +182,7 @@ function paragraphXml(ctx: Ctx, p: FlatPara): string {
         linkOpen = link;
       }
     }
-    if (it.type === 'text') x += textRuns(it.text, it.style);
+    if (it.type === 'text') x += commentStarts(ctx, it) + reviewedRun(ctx, it) + commentEnds(ctx, it);
     else if (it.type === 'break') x += '<w:r><w:br/></w:r>';
     else if (it.type === 'image') {
       const info = ctx.images.get(it.src);
@@ -268,6 +325,8 @@ export async function writeDocx(doc: KDocument): Promise<Uint8Array> {
     ctx.images.set(src, { rid, w: img.width, h: img.height, name });
   }
 
+  const commentData = s.comments || {};
+  collectComments(ctx, blocks, commentData);
   const body = blocks.map((b) => blockXml(ctx, b)).join('');
 
   // 머리말/꼬리말
@@ -314,6 +373,22 @@ export async function writeDocx(doc: KDocument): Promise<Uint8Array> {
     files.push(['word/footnotes.xml', DECL + `<w:footnotes ${W_NS}>${sep('separator', 0, 'separator')}${sep('continuationSeparator', 1, 'continuationSeparator')}${notes}</w:footnotes>`]);
     ctx.addRel('footnotes', 'footnotes.xml');
   }
+  // 메모 (답글은 같은 메모 안의 문단으로)
+  const hasComments = ctx.commentNo.size > 0;
+  if (hasComments) {
+    const para = (t: string, first: boolean, n: number) =>
+      `<w:p><w:pPr><w:pStyle w:val="CommentText"/></w:pPr>${first ? '<w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:annotationRef/></w:r>' : ''}<w:r><w:t xml:space="preserve">${xmlEscape(t)}</w:t></w:r></w:p>`;
+    const items = [...ctx.commentNo.entries()]
+      .map(([id, n]) => {
+        const c = commentData[id];
+        const body = [para((c.resolved ? '[해결됨] ' : '') + c.text, true, n), ...(c.replies || []).map((r) => para(`↳ ${r.author}: ${r.text}`, false, n))].join('');
+        const initials = (c.author || 'K').slice(0, 2);
+        return `<w:comment w:id="${n}" w:author="${xmlEscape(c.author || 'Kite')}" w:date="${isoTime(c.time)}" w:initials="${xmlEscape(initials)}">${body}</w:comment>`;
+      })
+      .join('');
+    files.push(['word/comments.xml', DECL + `<w:comments ${W_NS}>${items}</w:comments>`]);
+    ctx.addRel('comments', 'comments.xml');
+  }
   ctx.addRel('styles', 'styles.xml');
   ctx.addRel('settings', 'settings.xml');
 
@@ -330,6 +405,7 @@ export async function writeDocx(doc: KDocument): Promise<Uint8Array> {
       header: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/header',
       footer: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer',
       footnotes: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes',
+      comments: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments',
       styles: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles',
       settings: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings',
     })[t] || t;
@@ -349,6 +425,7 @@ export async function writeDocx(doc: KDocument): Promise<Uint8Array> {
     `<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>` +
     `<Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>` +
     (hasFootnotes ? `<Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/>` : '') +
+    (hasComments ? `<Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>` : '') +
     (hdrParas.length ? `<Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>` : '') +
     (ftrParas.length ? `<Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>` : '') +
     `<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>` +

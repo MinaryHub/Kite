@@ -458,7 +458,87 @@ const cellAttrs = {
     parseHTML: (el: HTMLElement) => el.getAttribute('data-border') || null,
     renderHTML: (a: Record<string, any>) => (a.borderStyle ? { 'data-border': a.borderStyle } : {}),
   },
+  /**
+   * 칸에 걸친 그림 (PDF 의 직인 등 표 위에 겹친 그림): [{ src, x, y, w, h }] — 칸 왼쪽 위 기준 pt.
+   * 편집기에 떠 있는 개체가 없어서 겹친 칸마다 배경 그림으로 그 부분을 깐다.
+   */
+  bgImages: {
+    default: null,
+    rendered: true,
+    parseHTML: (el: HTMLElement) => {
+      try {
+        const v = JSON.parse(el.getAttribute('data-bg-images') || 'null');
+        return cleanBgImages(v);
+      } catch {
+        return null;
+      }
+    },
+    renderHTML: (a: Record<string, any>) => {
+      const list = cleanBgImages(a.bgImages);
+      if (!list) return {};
+      // 그림 주소는 style 합치기에서 ';'·':' 가 잘리므로 스타일시트 규칙(data-bg-key)으로 넣는다
+      const key = bgRuleFor(list.map((b) => b.src));
+      const style = [
+        `background-position: ${list.map((b) => `${b.x}pt ${b.y}pt`).join(', ')}`,
+        `background-size: ${list.map((b) => `${b.w}pt ${b.h}pt`).join(', ')}`,
+        'background-repeat: no-repeat',
+        'background-origin: border-box',
+      ].join('; ');
+      return { 'data-bg-images': JSON.stringify(list), 'data-bg-key': key, style };
+    },
+  },
 };
+
+const blobUrls = new Map<string, string>();
+/** data:image 주소 → 같은 그림의 blob: 주소 (한 번만 만든다) */
+function blobUrlFor(src: string): string {
+  let u = blobUrls.get(src);
+  if (u) return u;
+  try {
+    const m = /^data:([^;,]+);base64,(.*)$/.exec(src);
+    if (!m || typeof URL === 'undefined' || !URL.createObjectURL) return '';
+    const bin = atob(m[2]);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    u = URL.createObjectURL(new Blob([bytes], { type: m[1] }));
+    blobUrls.set(src, u);
+    return u;
+  } catch {
+    return '';
+  }
+}
+
+let bgSheet: HTMLStyleElement | null = null;
+const bgKeys = new Map<string, string>();
+/** 그림 주소 목록에 대한 배경 그림 규칙을 (한 번만) 만들고 그 키를 돌려준다 */
+function bgRuleFor(srcs: string[]): string {
+  const id = srcs.join('|');
+  let key = bgKeys.get(id);
+  if (key) return key;
+  key = 'k' + bgKeys.size.toString(36);
+  bgKeys.set(id, key);
+  if (typeof document !== 'undefined') {
+    if (!bgSheet) {
+      bgSheet = document.createElement('style');
+      bgSheet.id = 'kite-cell-bg-images';
+      document.head.appendChild(bgSheet);
+    }
+    const urls = srcs.map((s) => `url("${blobUrlFor(s)}")`).join(', ');
+    bgSheet.appendChild(document.createTextNode(`[data-bg-key="${key}"] { background-image: ${urls}; }\n`));
+  }
+  return key;
+}
+
+/** 칸 배경 그림 목록: data:image 주소와 유한한 수만 남긴다 (문서에서 온 값이므로) */
+function cleanBgImages(v: any): { src: string; x: number; y: number; w: number; h: number }[] | null {
+  if (!Array.isArray(v)) return null;
+  const num = (n: any) => (typeof n === 'number' && isFinite(n) ? Math.round(n * 10) / 10 : null);
+  const out = v
+    .slice(0, 8)
+    .map((b: any) => ({ src: b?.src, x: num(b?.x), y: num(b?.y), w: num(b?.w), h: num(b?.h) }))
+    .filter((b: any) => typeof b.src === 'string' && /^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+$/.test(b.src) && b.x != null && b.y != null && b.w != null && b.w > 0 && b.h != null && b.h > 0);
+  return out.length ? (out as { src: string; x: number; y: number; w: number; h: number }[]) : null;
+}
 
 export const KTableCell = TableCell.extend({
   addAttributes() {
@@ -524,7 +604,8 @@ class KTableView extends TableView {
     if (node.attrs.cellPadding != null) t.style.setProperty('--cell-px', node.attrs.cellPadding + 'px');
     else t.style.removeProperty('--cell-px');
     const align = node.attrs.align;
-    t.style.marginLeft = align === 'center' || align === 'right' ? 'auto' : '';
+    const indent = typeof node.attrs.indent === 'number' && isFinite(node.attrs.indent) ? Math.max(-200, Math.min(400, node.attrs.indent)) : 0;
+    t.style.marginLeft = align === 'center' || align === 'right' ? 'auto' : indent ? indent + 'pt' : '';
     t.style.marginRight = align === 'center' ? 'auto' : '';
   }
 }
@@ -568,6 +649,15 @@ export const KTable = Table.extend({
         default: null,
         parseHTML: (el: HTMLElement) => el.getAttribute('data-align') || null,
         renderHTML: (a: Record<string, any>) => (a.align ? { 'data-align': a.align } : {}),
+      },
+      /** 왼쪽 들여쓰기 (pt) — 왼쪽 정렬일 때 본문 왼쪽 끝에서 표까지 */
+      indent: {
+        default: null,
+        parseHTML: (el: HTMLElement) => {
+          const v = parseFloat(el.getAttribute('data-indent') || '');
+          return isFinite(v) && v ? v : null;
+        },
+        renderHTML: (a: Record<string, any>) => (a.indent ? { 'data-indent': String(a.indent), style: `margin-left: ${a.indent}pt` } : {}),
       },
     };
   },

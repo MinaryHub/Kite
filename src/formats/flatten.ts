@@ -1,3 +1,4 @@
+import { latexToHwp } from '../math/hwpEq';
 import { DEFAULT_FONT, DEFAULT_FONT_SIZE, type JMark, type JNode, formatNumber, normColor, toRoman } from './common';
 
 /**
@@ -47,8 +48,14 @@ export interface TabInfo {
   type: number;
 }
 
+/** 검토 정보 (변경 내용·메모) — 지원하는 형식(DOCX)만 쓴다 */
+export interface ReviewInfo {
+  change?: { type: 'ins' | 'del'; author: string; time: number };
+  comments?: string[];
+}
+
 export type FlatInline =
-  | { type: 'text'; text: string; style: CharStyle; link: string | null; tab?: TabInfo | null }
+  | { type: 'text'; text: string; style: CharStyle; link: string | null; tab?: TabInfo | null; review?: ReviewInfo; math?: { latex: string; hwp: string } }
   | { type: 'break' }
   | { type: 'image'; src: string; width: number | null; height: number | null; style: CharStyle; crop: { t: number; r: number; b: number; l: number } | null }
   | { type: 'footnote'; text: string; style: CharStyle };
@@ -222,6 +229,17 @@ function applyMarks(base: CharStyle, marks: JMark[] | undefined): { style: CharS
   }
   return { style: s, link, tab };
 }
+
+/** 글자의 변경 내용·메모 표시 */
+function reviewOf(marks: JMark[] | undefined): ReviewInfo | undefined {
+  let r: ReviewInfo | undefined;
+  for (const m of marks || []) {
+    if (m.type === 'insertion' || m.type === 'deletion') (r ||= {}).change = { type: m.type === 'insertion' ? 'ins' : 'del', author: String(m.attrs?.author || ''), time: +m.attrs?.time || 0 };
+    else if (m.type === 'comment' && m.attrs?.id) ((r ||= {}).comments ||= []).push(String(m.attrs.id));
+  }
+  return r;
+}
+const reviewKey = (r?: ReviewInfo) => (r ? JSON.stringify([r.change?.type, r.change?.author, r.change?.time, r.comments]) : '');
 
 function normalizeHex(c: string): string | null {
   if (/^#[0-9a-f]{6}$/i.test(c)) return c.toUpperCase();
@@ -407,16 +425,22 @@ function flattenPara(n: JNode, ctx: Ctx, level: number): FlatPara {
   for (const c of n.content || []) {
     if (c.type === 'text') {
       const { style: cs, link, tab } = applyMarks(base, c.marks);
+      const review = reviewOf(c.marks);
       const prev = inlines[inlines.length - 1];
       // 탭 정보가 붙은 글자는 따로 둔다 (탭 하나짜리 텍스트)
-      if (!tab && prev && prev.type === 'text' && !prev.tab && charKey(prev.style) === charKey(cs) && prev.link === link) prev.text += c.text || '';
-      else inlines.push({ type: 'text', text: c.text || '', style: cs, link, tab });
+      if (!tab && prev && prev.type === 'text' && !prev.tab && !prev.math && charKey(prev.style) === charKey(cs) && prev.link === link && reviewKey(prev.review) === reviewKey(review)) prev.text += c.text || '';
+      else inlines.push({ type: 'text', text: c.text || '', style: cs, link, tab, ...(review ? { review } : {}) });
     } else if (c.type === 'hardBreak') inlines.push({ type: 'break' });
     else if (c.type === 'image') {
       const { style: cs } = applyMarks(base, c.marks);
       inlines.push({ type: 'image', src: c.attrs?.src, width: c.attrs?.width || null, height: c.attrs?.height || null, style: cs, crop: c.attrs?.crop || null });
     } else if (c.type === 'footnote') {
       inlines.push({ type: 'footnote', text: c.attrs?.text || '', style: applyMarks(base, c.marks).style });
+    } else if (c.type === 'math') {
+      // 수식: 수식을 아는 형식(HWPX)은 math 를 쓰고, 나머지는 한글 수식 글자로 남는다
+      const { style: cs, link } = applyMarks(base, c.marks);
+      const math = { latex: c.attrs?.latex || '', hwp: c.attrs?.hwp || latexToHwp(c.attrs?.latex || '') };
+      inlines.push({ type: 'text', text: math.hwp || math.latex, style: { ...cs, italic: true }, link, math });
     }
   }
   const firstText = inlines.find((i) => i.type === 'text') as any;

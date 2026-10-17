@@ -15,6 +15,7 @@ import TaskItem from '@tiptap/extension-task-item';
 import CharacterCount from '@tiptap/extension-character-count';
 import type { Schema } from '@tiptap/pm/model';
 import { ParagraphFormat } from './extensions/paragraphFormat';
+import { MathInline } from './extensions/math';
 import { TextStyleExt } from './extensions/textStyleExt';
 import {
   KImage,
@@ -33,6 +34,9 @@ import {
 import { Search } from './extensions/search';
 import { Pagination } from './extensions/pagination';
 import { TableResize } from './extensions/tableResize';
+import { CheckMarks } from './extensions/checkMarks';
+import { Insertion, Deletion, TrackChanges } from './extensions/trackChanges';
+import { CommentMark } from './extensions/comments';
 
 /** 문서 스키마를 구성하는 확장 (편집기 없이 변환에도 사용) */
 export function getExtensions(): AnyExtension[] {
@@ -98,14 +102,19 @@ export function getExtensions(): AnyExtension[] {
     TextStyleExt,
     PageBreak,
     Footnote,
+    MathInline,
     TextBox,
     TabStop,
+    // 검토: 변경 내용(넣음/지움)과 메모
+    Insertion,
+    Deletion,
+    CommentMark,
   ];
 }
 
 /** 편집 화면용 확장 (스키마 + 편집 기능) */
 export function getEditorExtensions(): AnyExtension[] {
-  return [...getExtensions(), KeyboardExtras, CellNoWrap, Search, CharacterCount, Pagination, TableResize];
+  return [...getExtensions(), KeyboardExtras, CellNoWrap, Search, CharacterCount, Pagination, TableResize, CheckMarks, TrackChanges];
 }
 
 let cachedSchema: Schema | null = null;

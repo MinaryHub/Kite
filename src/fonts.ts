@@ -192,6 +192,71 @@ export function collectFontNames(doc: any): Set<string> {
   return out;
 }
 
+/** PDF 에서 꺼내 올린 글꼴 이름들 (시스템에 없어서 PDF 안의 글꼴로 대신 그리는 것) */
+export const embeddedFamilies = new Set<string>();
+/** 시스템에도 있는 글꼴의 PDF 판: 글꼴 이름 → 별칭 (PDF 에 든 글자는 이것으로, 나머지는 시스템 글꼴로 그린다) */
+export const embeddedAliases = new Map<string, string>();
+
+/**
+ * PDF 에 들어 있던 글꼴(일부 글자만 담긴 것)을 그 글꼴 이름으로 올린다.
+ * unicode-range 를 담긴 글자로 한정하므로, 담기지 않은 글자는 원래처럼 대체 글꼴로 그려진다.
+ */
+export async function registerEmbeddedFont(family: string, data: Uint8Array, opts: { weight: string; style: string; unicodeRange: string; alias?: boolean }): Promise<boolean> {
+  if (typeof FontFace === 'undefined' || typeof document === 'undefined') return false;
+  const name = opts.alias ? family.trim() + ' kite-pdf' : family;
+  try {
+    const buf = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+    // 위아래 높이를 모든 PDF 글꼴에 같게: 글꼴이 섞인 줄이 줄 간격보다 높아지지 않게 한다
+    // (88/12 는 PDF 배치 코드가 가정하는 기준선 위치와 같다)
+    const face = new FontFace(name, buf, {
+      weight: opts.weight,
+      style: opts.style,
+      unicodeRange: opts.unicodeRange,
+      display: 'block',
+      ascentOverride: '88%',
+      descentOverride: '12%',
+      lineGapOverride: '0%',
+    } as FontFaceDescriptors);
+    await face.load();
+    document.fonts.add(face);
+    if (opts.alias) embeddedAliases.set(family.trim(), name);
+    else embeddedFamilies.add(family.trim());
+    return true;
+  } catch (e) {
+    console.warn('PDF 글꼴을 올리지 못했습니다:', family, e);
+    return false;
+  }
+}
+
+const pdfFaceKeys = new Set<string>();
+/** 문서에 담긴 PDF 글꼴을 (아직 안 올렸으면) 올린다 — 자동 저장에서 복구한 문서 등 */
+export async function registerPdfFonts(list: { family: string; alias?: boolean; weight: string; style: string; unicodeRange: string; data: string }[] | undefined): Promise<void> {
+  if (!Array.isArray(list) || typeof atob === 'undefined') return;
+  const jobs: Promise<unknown>[] = [];
+  for (const f of list.slice(0, 200)) {
+    if (!f || typeof f.family !== 'string' || typeof f.data !== 'string' || typeof f.unicodeRange !== 'string') continue;
+    const key = `${f.family}|${f.weight}|${f.style}|${f.alias ? 1 : 0}|${f.data.length}|${f.data.slice(0, 64)}|${f.data.slice(-64)}`;
+    if (pdfFaceKeys.has(key)) continue;
+    pdfFaceKeys.add(key);
+    try {
+      const bin = atob(f.data);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      jobs.push(registerEmbeddedFont(f.family, bytes, { weight: /^(400|700)$/.test(f.weight) ? f.weight : '400', style: f.style === 'italic' ? 'italic' : 'normal', unicodeRange: f.unicodeRange, alias: !!f.alias }));
+    } catch {
+      /* 깨진 글꼴은 건너뛴다 */
+    }
+  }
+  await Promise.all(jobs);
+}
+
+/** base64 (큰 배열도 되도록 나눠서) */
+export function bytesToBase64(b: Uint8Array): string {
+  let s = '';
+  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
 /** 이름만으로 굵은 제목용 글꼴임을 알 수 있는 것들 (설치되어 있지 않으면 대체 글꼴을 굵게 보여 준다) */
 const HEAVY_RE = /헤드라인|견고딕|견명조|태고딕|태명조|굵은|Headline|Black|Heavy|ExtraBold|Bold|\bB$/i;
 
@@ -199,6 +264,7 @@ const HEAVY_RE = /헤드라인|견고딕|견명조|태고딕|태명조|굵은|He
 export function fontWeightFallback(name: string): string | null {
   if (!HEAVY_RE.test(name)) return null;
   const n = name.trim();
+  if (embeddedFamilies.has(n)) return null;
   if (fontUsable(n) || usableAlias(n)) return null;
   // 한컴 폴더에서 실제 글꼴을 올릴 수 있으면 굵기를 흉내 내지 않는다
   if (privateFontFor(n)) return null;
@@ -211,7 +277,9 @@ export function fontStack(name: string): string {
   const safe = name.replace(/[\u0000-\u001f\u007f'"\\;:{}()<>@[\]]/g, '').trim().slice(0, 80) || '함초롬바탕';
   // 그 이름으로는 못 그리지만 다른 이름(영문 이름·HY 이름)으로 설치되어 있으면 그 이름을 먼저 둔다
   const alias = fontUsable(safe) ? null : usableAlias(safe);
-  const q = alias ? `'${alias}', '${safe}'` : `'${safe}'`;
+  const pdfAlias = embeddedAliases.get(safe);
+  // PDF 판(같은 글꼴의 일부 글자)은 앞에 둔다: PDF 와 같은 글리프·높이로 그리고, 없는 글자는 시스템 글꼴로
+  const q = (pdfAlias ? `'${pdfAlias.replace(/['"\\]/g, '')}', ` : '') + (alias ? `'${alias}', '${safe}'` : `'${safe}'`);
   if (/D2Coding|Consolas|Courier|Mono|코딩/i.test(name)) return `${q}, D2Coding, Consolas, monospace`;
   // kite-sym: 가운뎃점(·) 등 몇몇 기호만 맡는 글꼴(editor.css 의 @font-face, unicode-range).
   // 휴먼명조·HY 계열 글꼴은 이 기호를 전각으로 그리지만 한글은 기호 글꼴로 반각으로 보여 주므로 그에 맞춘다.

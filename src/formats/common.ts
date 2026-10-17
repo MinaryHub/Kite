@@ -1,4 +1,5 @@
 import type { JSZipObject } from 'jszip';
+import { latexToHwp } from '../math/hwpEq';
 import type { DocSettings } from '../types';
 
 export interface JMark {
@@ -415,9 +416,10 @@ export function docNode(blocks: JNode[]): JNode {
 export function nodeText(n: JNode): string {
   if (n.type === 'text') return n.text || '';
   if (n.type === 'hardBreak') return '\n';
+  if (n.type === 'math') return n.attrs?.hwp || latexToHwp(n.attrs?.latex || '');
   if (!n.content) return '';
   const inner = n.content.map(nodeText);
-  const isBlockContainer = n.content.some((c) => c.type !== 'text' && c.type !== 'hardBreak' && c.type !== 'image' && c.type !== 'footnote');
+  const isBlockContainer = n.content.some((c) => c.type !== 'text' && c.type !== 'hardBreak' && c.type !== 'image' && c.type !== 'footnote' && c.type !== 'math');
   return inner.join(isBlockContainer ? '\n' : '');
 }
 

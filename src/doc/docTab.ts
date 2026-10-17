@@ -74,6 +74,8 @@ export class DocTab {
     tr.setSelection(Selection.atStart(tr.doc));
     // 처음 불러온 내용은 되돌리기 기록에서 제외
     if (initial) tr.setMeta('addToHistory', false);
+    // 문서를 통째로 바꾸는 것은 변경 내용 추적 대상이 아니다
+    tr.setMeta('trackChanges:skip', true);
     view.dispatch(tr);
   }
 

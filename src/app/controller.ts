@@ -5,7 +5,9 @@ import { baseName, splitExt, MAX_IMPORT_BYTES } from '../formats/common';
 import type { SaveFormatId } from '../types';
 import { withPrintRoot } from '../print';
 import { viewState } from '../editor/viewState';
-import { KOREAN_FONTS, LATIN_FONTS, installedFonts, privateFontNames, ensurePrivateFonts, collectFontNames } from '../fonts';
+import { KOREAN_FONTS, LATIN_FONTS, installedFonts, privateFontNames, ensurePrivateFonts, collectFontNames, registerPdfFonts } from '../fonts';
+
+import * as versions from './versions';
 
 export interface DialogState {
   type: string;
@@ -39,6 +41,16 @@ export interface Prefs {
   spellcheck: boolean;
   recentFonts: string[];
   defaultSaveFormat: SaveFormatId;
+  /** 화면 테마 (system: 운영체제 설정을 따름) */
+  theme: 'light' | 'dark' | 'system';
+  /** 어두운 테마에서 종이도 어둡게 (화면에서만, 인쇄는 그대로) */
+  darkPaper: boolean;
+  /** 최근에 쓴 명령 (명령 팔레트) */
+  recentCommands: string[];
+  /** AI 앱(MCP)의 수정을 변경 제안으로 남긴다 */
+  mcpSuggest: boolean;
+  /** 변경 내용·메모에 남길 이름 */
+  userName: string;
 }
 
 export interface ViewOptions {
@@ -108,7 +120,22 @@ export class AppController {
     spellcheck: false,
     recentFonts: [],
     defaultSaveFormat: 'hwpx',
+    theme: 'system',
+    darkPaper: false,
+    recentCommands: [],
+    mcpSuggest: false,
+    userName: '',
   };
+  /** 명령 팔레트 */
+  paletteOpen = false;
+  /** 문서 검사 창 */
+  checkOpen = false;
+  /** 검토 창 (메모·변경 내용) */
+  reviewOpen = false;
+  versionsOpen = false;
+  reviewTab: 'comments' | 'changes' = 'comments';
+  /** 메모 입력 칸을 바로 연다 */
+  commentDraft = false;
   private listeners = new Set<() => void>();
   private untitledNo = 0;
   private autosaveTimer: any = null;
@@ -137,6 +164,7 @@ export class AppController {
   }
 
   async init() {
+    versions.startAutoVersions(() => this.docs);
     try {
       const prefs = await platform.getPrefs();
       if (prefs && typeof prefs === 'object') this.prefs = { ...this.prefs, ...prefs };
@@ -145,6 +173,7 @@ export class AppController {
     } catch {
       /* 무시 */
     }
+    this.applyTheme();
     this.recent = await platform.getRecent();
     platform.listFonts().then((f) => {
       this.systemFonts = f;
@@ -178,6 +207,37 @@ export class AppController {
 
   savePrefs() {
     platform.setPrefs({ ...this.prefs, view: this.view, zoom: this.zoom });
+  }
+
+  // ---------------- 테마 ----------------
+  private themeQuery: MediaQueryList | null = null;
+  /** 실제로 쓰는 테마 */
+  get effectiveTheme(): 'light' | 'dark' {
+    if (this.prefs.theme === 'dark' || this.prefs.theme === 'light') return this.prefs.theme;
+    return typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  /** 테마를 문서 루트에 반영 (대화 상자 등 앱 밖에 붙는 요소까지 같은 색을 쓰게) */
+  applyTheme() {
+    if (typeof document === 'undefined') return;
+    const dark = this.effectiveTheme === 'dark';
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    if (dark && this.prefs.darkPaper) document.documentElement.dataset.paper = 'dark';
+    else delete document.documentElement.dataset.paper;
+    if (!this.themeQuery && window.matchMedia) {
+      this.themeQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      this.themeQuery.addEventListener('change', () => {
+        if (this.prefs.theme === 'system') {
+          this.applyTheme();
+          this.emit();
+        }
+      });
+    }
+  }
+  setTheme(theme: Prefs['theme'], darkPaper = this.prefs.darkPaper) {
+    this.prefs = { ...this.prefs, theme, darkPaper };
+    this.applyTheme();
+    this.savePrefs();
+    this.emit();
   }
 
   // ---------------- 알림 ----------------
@@ -219,8 +279,10 @@ export class AppController {
   }
 
   // ---------------- 문서 ----------------
-  /** 문서가 쓰는 글꼴 가운데 한컴 폴더에만 있는 것을 올린다 */
+  /** 문서가 쓰는 글꼴 가운데 한컴 폴더에만 있는 것과 문서에 담긴 PDF 글꼴을 올린다 */
   private loadDocFonts(tab: DocTab) {
+    // PDF 에서 꺼낸 글꼴 (자동 저장에서 복구한 문서도 같은 글꼴로)
+    if (tab.settings.pdfFonts) void registerPdfFonts(tab.settings.pdfFonts);
     if (!privateFontNames.size) return;
     const names = collectFontNames(tab.editor.getJSON());
     void ensurePrivateFonts(names, (n) => platform.readPrivateFont(n));
@@ -240,6 +302,13 @@ export class AppController {
     this.updateTitle();
     this.emit();
     setTimeout(() => tab.editor.commands.focus('start'), 50);
+  }
+
+  /** 사본(버전 기록 등)을 새 탭으로 연다 */
+  openCopy(title: string, doc: { content: any; settings?: any; meta?: any }) {
+    const tab = new DocTab({ title, content: doc.content, settings: doc.settings, meta: doc.meta });
+    this.addDoc(tab);
+    return tab;
   }
 
   newDoc() {
@@ -373,6 +442,25 @@ export class AppController {
   }
 
   private async writeTo(tab: DocTab, path: string, format: SaveFormatId): Promise<boolean> {
+    // 변경 내용·메모는 DOCX 만 저장한다: 다른 형식이면 알리고 고르게 한다
+    if (format !== 'docx') {
+      const { hasReviewMarks } = await import('../formats/review');
+      const r = hasReviewMarks(tab.editor.getJSON());
+      if (r.changes || r.comments) {
+        const what = [r.changes ? '변경 내용 기록' : '', r.comments ? '메모' : ''].filter(Boolean).join('과 ');
+        const pick = await this.confirm(
+          '검토 내용 저장',
+          `${format.toUpperCase()} 형식에는 ${what}을(를) 저장할 수 없습니다.\n변경은 모두 반영하고 메모는 뺀 상태로 저장합니다. (편집 중인 문서는 그대로 남습니다)\n\n검토 내용을 그대로 두려면 Word(DOCX)로 저장하세요.`,
+          [
+            { id: 'save', label: '반영하여 저장', primary: true },
+            { id: 'docx', label: 'Word(DOCX)로 저장' },
+            { id: 'cancel', label: '취소' },
+          ],
+        );
+        if (pick === 'cancel') return false;
+        if (pick === 'docx') return this.saveAs(tab, 'docx');
+      }
+    }
     this.set({ busy: '저장하는 중…' });
     try {
       const data = await exportDocument(format, tab.toKDocument(), { pageCount: tab.layout.pageCount });
@@ -387,6 +475,7 @@ export class AppController {
         tab.saveFormat = format;
       }
       tab.markSaved();
+      void versions.snapshot(tab, 'save');
       this.overwriteConfirm.delete(tab.id);
       platform.autosaveRemove(tab.id);
       this.toast(`저장했습니다: ${baseName(path)}`);
@@ -439,6 +528,10 @@ export class AppController {
       if (r === 'save' && !(await this.save(tab))) return false;
     }
     const idx = this.docs.indexOf(tab);
+    // 공동 편집 중인 문서를 닫으면 공동 편집도 끝낸다
+    void import('../collab/session').then((m) => {
+      if (m.collabState()?.tabId === id) void m.stopCollab();
+    });
     this.docUnsubs.get(id)?.();
     this.docUnsubs.delete(id);
     this.docs = this.docs.filter((d) => d.id !== id);

@@ -52,8 +52,23 @@ export function McpDialog({ onClose }: { onClose: () => void }) {
         <input type="checkbox" checked={st.confirmEdits} onChange={(e) => set({ confirmEdits: e.target.checked })} />
         AI 가 문서를 고칠 때마다 확인받기
       </label>
-      <div className="unit" style={{ margin: '4px 0 12px 24px', lineHeight: 1.5 }}>
+      <div className="unit" style={{ margin: '4px 0 8px 24px', lineHeight: 1.5 }}>
         끄면 확인 없이 고치고, 고친 내용은 Ctrl+Z 로 되돌릴 수 있습니다. 처음 연결하는 앱은 항상 허용 여부를 묻습니다.
+      </div>
+      <label className="check" style={{ display: 'flex', marginBottom: 4 }}>
+        <input
+          type="checkbox"
+          checked={!!app.prefs.mcpSuggest}
+          onChange={(e) => {
+            app.prefs.mcpSuggest = e.target.checked;
+            app.savePrefs();
+            app.emit();
+          }}
+        />
+        AI 앱의 수정을 변경 제안으로 남기기
+      </label>
+      <div className="unit" style={{ margin: '4px 0 12px 24px', lineHeight: 1.5 }}>
+        켜면 AI 가 넣고 지운 글이 앱 이름으로 표시되고, 검토 창에서 하나씩 받아들이거나 되돌릴 수 있습니다.
       </div>
 
       <Fieldset legend="Claude 데스크톱">

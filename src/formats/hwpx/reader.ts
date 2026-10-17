@@ -1,3 +1,4 @@
+import { hwpToLatex } from '../../math/hwpEq';
 import JSZip from 'jszip';
 import { CELL_VMARGIN_HWP, assembleTable } from '../hwp/reader';
 import type { DocMeta, DocSettings, LoadedDoc } from '../../types';
@@ -402,8 +403,7 @@ export class HwpxConverter {
             break;
           case 'equation': {
             const script = kid(child, 'script')?.textContent || '';
-            const t = textNode(script ? `[수식: ${script}]` : '[수식]', [...charMarks(cp), { type: 'italic' }]);
-            if (t) inline.push(t);
+            if (script.trim()) inline.push({ type: 'math', attrs: { latex: hwpToLatex(script), hwp: script }, marks: charMarks(cp) });
             break;
           }
           case 'ctrl':

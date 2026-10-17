@@ -38,9 +38,14 @@ const FONT_MAP: [RegExp, string][] = [
   [/^(H2|HY)gsrB/i, 'HY궁서B'],
   [/^(H2|HY)porM/i, 'HY엽서M'],
   [/^(H2|HY)mjM/i, 'HY중명조'],
-  [/HANBatang|Haansoft\s*Batang/i, '한컴바탕'],
-  [/HANDotum|Haansoft\s*Dotum/i, '한컴돋움'],
+  [/HANBatang|Haansoft\s*\d*\s*Batang/i, '한컴바탕'],
+  [/HANDotum|Haansoft\s*\d*\s*Dotum/i, '한컴돋움'],
   [/nanum\s*barun\s*gothic/i, '나눔바른고딕'],
+  // 고정폭(…체)은 일반 글꼴과 폭이 달라 따로 본다
+  [/batang\s*che/i, '바탕체'],
+  [/dotum\s*che/i, '돋움체'],
+  [/gulim\s*che/i, '굴림체'],
+  [/gungsuh\s*che/i, '궁서체'],
   [/batang/i, '바탕'],
   [/dotum/i, '돋움'],
   [/gulim/i, '굴림'],
@@ -50,6 +55,9 @@ const FONT_MAP: [RegExp, string][] = [
   [/nanum\s*square/i, '나눔스퀘어'],
   [/noto\s*sans\s*(cjk|kr)/i, 'Noto Sans KR'],
   [/noto\s*serif\s*(cjk|kr)/i, 'Noto Serif KR'],
+  [/^MS-?PGothic/i, 'MS PGothic'],
+  [/^MS-?Gothic/i, 'MS Gothic'],
+  [/^SegoeUI/i, 'Segoe UI'],
   [/times/i, 'Times New Roman'],
   [/arial/i, 'Arial'],
   [/helvetica/i, 'Arial'],
@@ -60,11 +68,16 @@ const FONT_MAP: [RegExp, string][] = [
   [/wingdings/i, 'Wingdings'],
 ];
 
+/** 원래 이름을 잃은 글꼴 이름 (F1, T1_0, g_d0_f1, Type3 …) */
+export function isAnonymousFont(base: string): boolean {
+  return /^(g_d\d|f\d|T\d|F\d|[A-Z]{1,2}\d+(_\d+)?$|Type3)/i.test(base.replace(/^[A-Z]{6}\+/, '').replace(/^CIDFont\+/i, ''));
+}
+
 const fontCache = new Map<string, { family: string | null; bold: boolean; italic: boolean }>();
 export function cleanFontName(name: string): { family: string | null; bold: boolean; italic: boolean } {
   const hit = fontCache.get(name);
   if (hit) return hit;
-  let n = name.replace(/^[A-Z]{6}\+/, '');
+  let n = name.replace(/^[A-Z]{6}\+/, '').replace(/^CIDFont\+/i, '');
   // EUC-KR 바이트가 Latin-1 로 풀린 한글 글꼴 이름 (예: ÈÞ¸Õ¸íÁ¶ → 휴먼명조)
   if (/[\x80-\xff]/.test(n) && !/[^\x00-\xff]/.test(n)) {
     try {
@@ -85,7 +98,7 @@ export function cleanFontName(name: string): { family: string | null; bold: bool
     }
   if (!res) {
     const base = n.replace(/[-,](Bold|Italic|Regular|Medium|Light|Black|Heavy|SemiBold|Oblique|BoldItalic|B|R|M|L)+$/i, '').replace(/MT$|PS$/, '');
-    res = { family: base && !/^(g_d\d|f\d|T\d|F\d|[A-Z]\d+$|Type3)/i.test(base) ? base : null, bold, italic };
+    res = { family: base && !isAnonymousFont(base) ? base : null, bold, italic };
   }
   fontCache.set(name, res);
   return res;
@@ -130,7 +143,8 @@ function buildLines(glyphs: Glyph[], underlined: Set<Glyph>): TLine[] {
     for (const g of l.glyphs) {
       const p = out[out.length - 1];
       if (p && p.ch === g.ch && Math.abs(p.x - g.x) < g.size * 0.2 && Math.abs(p.y - g.y) < 1) {
-        if (g.ch.trim()) p.bold = true;
+        // 살짝 옮겨 찍었으면 굵은 글씨, 같은 자리에 겹쳐 그린 것(직인 위에 다시 쓴 글자 등)은 그냥 한 글자
+        if (g.ch.trim() && (Math.abs(p.x - g.x) > g.size * 0.015 || Math.abs(p.y - g.y) > g.size * 0.015)) p.bold = true;
         continue;
       }
       out.push(g);
@@ -247,6 +261,140 @@ function lineInline(l: TLine, bg: string | null, spacing: number | null = null):
   return out;
 }
 
+/** 글줄 안에 끼운 작은 그림 (보기 번호·아이콘 등): 자리 표시 글자 → 그림 */
+const inlineImg = new WeakMap<Glyph, { im: PdfImage; src: string }>();
+
+/** 글자 하나의 서식 (자간 제외) */
+function glyphStyle(g: Glyph, l: TLine, bg: string | null): { ts: Record<string, any>; marks: JMark[]; family: string | null; size: number; bold: boolean; italic: boolean } {
+  const fi = cleanFontName(g.font);
+  const size = Math.round(g.size * 2) / 2;
+  const ts: Record<string, any> = { fontSize: size };
+  if (fi.family) ts.fontFamily = fi.family;
+  const color = visibleColor(g.color, bg);
+  if (color) ts.color = color;
+  if (g.hscale && g.hscale !== 100 && g.hscale >= 50 && g.hscale <= 200) ts.fontWidth = g.hscale;
+  const bold = g.bold || fi.bold;
+  const marks: JMark[] = [];
+  if (bold) marks.push({ type: 'bold' });
+  if (fi.italic) marks.push({ type: 'italic' });
+  if (l.underline.has(g)) marks.push({ type: 'underline' });
+  return { ts, marks, family: fi.family, size, bold, italic: fi.italic };
+}
+
+/**
+ * 한 줄을 PDF 와 같은 자리에 오도록 만든다: 낱말마다 PDF 의 시작 위치에 맞게 앞 공백의 자간을 주고,
+ * 낱말 폭이 화면 글꼴과 다르면 그 낱말에 자간을 준다. (측정 함수가 있을 때만)
+ * @param maxW 이 줄이 쓸 수 있는 폭 — 넘으면 줄이 다시 바뀌므로 비율대로 좁힌다
+ */
+function exactLineInline(l: TLine, bg: string | null, measure: NonNullable<LayoutCtx['measure']>, maxW: number): JNode[] {
+  const gs = l.glyphs;
+  const firstVis = gs.findIndex((g) => g.ch.trim());
+  if (firstVis < 0) return [];
+  // 낱말: 공백 글자나 글자 크기의 0.2배 넘는 틈으로 나눈다
+  const words: Glyph[][] = [];
+  let cur: Glyph[] = [];
+  let prev: Glyph | null = null;
+  for (let i = firstVis; i < gs.length; i++) {
+    const g = gs[i];
+    if (!g.ch.trim()) {
+      if (cur.length) words.push(cur);
+      cur = [];
+      continue;
+    }
+    const isImg = inlineImg.has(g);
+    if (prev && cur.length && (isImg || inlineImg.has(prev) || g.x - (prev.x + prev.w) > g.size * 0.2)) {
+      words.push(cur);
+      cur = [];
+    }
+    cur.push(g);
+    prev = g;
+  }
+  if (cur.length) words.push(cur);
+  // 글자마다 서식은 한 번만 계산한다 (서식이 같은 조각을 찾을 때 여러 번 쓴다)
+  const styleCache = new Map<Glyph, { st: ReturnType<typeof glyphStyle>; key: string }>();
+  const styleOf = (g: Glyph) => {
+    let v = styleCache.get(g);
+    if (!v) {
+      const st = glyphStyle(g, l, bg);
+      v = { st, key: JSON.stringify([st.ts, st.marks]) };
+      styleCache.set(g, v);
+    }
+    return v;
+  };
+  const x0 = gs[firstVis].x;
+  const lineW = l.x1 - x0;
+  const k = lineW > maxW && lineW > 0 ? maxW / lineW : 1;
+  const X = (x: number) => x0 + (x - x0) * k;
+  let cursor = x0;
+  const out: ({ text: string; ts: Record<string, any>; marks: JMark[] } | { image: JNode })[] = [];
+  const push = (text: string, ts: Record<string, any>, marks: JMark[], ls: number) => {
+    const t = { ...ts };
+    if (ls) t.letterSpacing = ls;
+    out.push({ text, ts: t, marks });
+  };
+  const r1 = (v: number) => Math.round(v * 10) / 10;
+  for (let wi = 0; wi < words.length; wi++) {
+    const w = words[wi];
+    if (wi > 0) {
+      // 앞 낱말의 서식으로 공백을 넣고, 다음 낱말이 PDF 위치에서 시작하도록 자간을 준다
+      const pg = words[wi - 1][words[wi - 1].length - 1];
+      const st = styleOf(pg).st;
+      const sw = measure(' ', st.family, st.size, st.bold, st.italic);
+      let ls = ((X(w[0].x) - cursor - sw) / st.size) * 100;
+      // 띄운 거리가 큰 곳(표 없이 칸을 맞춘 금액 등)도 PDF 자리에 오도록 상한을 크게 둔다
+      ls = r1(Math.max(-(sw / st.size) * 90, Math.min(20000, ls)));
+      if (Math.abs(ls) < 0.5) ls = 0;
+      push(' ', st.ts, st.marks, ls);
+      cursor += sw + (ls * st.size) / 100;
+    }
+    // 끼운 그림: 그림 폭만큼
+    const ii = inlineImg.get(w[0]);
+    if (ii) {
+      const iw = ii.im.x1 - ii.im.x0;
+      out.push({ image: { type: 'image', attrs: { src: ii.src, width: Math.max(1, Math.round(iw * k * PT2PX)), height: Math.max(1, Math.round((ii.im.y1 - ii.im.y0) * PT2PX)) } } });
+      cursor += iw * k;
+      continue;
+    }
+    // 낱말 안: 서식이 같은 조각마다 폭을 PDF 에 맞춘다
+    let a = 0;
+    while (a < w.length) {
+      const { st, key } = styleOf(w[a]);
+      let b = a + 1;
+      while (b < w.length && styleOf(w[b]).key === key) b++;
+      const seg = w.slice(a, b);
+      const text = seg.map((g) => g.ch).join('');
+      const n = [...text].length;
+      const m = measure(text, st.family, st.size, st.bold, st.italic);
+      const last = seg[seg.length - 1];
+      const diff = X(last.x + last.w) - cursor - m;
+      let ls = 0;
+      if (Math.abs(diff) > 0.3 && n > 0) ls = r1(Math.max(-30, Math.min(100, (diff / n / st.size) * 100)));
+      push(text, st.ts, st.marks, ls);
+      cursor += m + (n * ls * st.size) / 100;
+      a = b;
+    }
+  }
+  // 서식이 같은 이웃끼리 합친다
+  const nodes: JNode[] = [];
+  let lastKey = '';
+  for (const o of out) {
+    if ('image' in o) {
+      nodes.push(o.image);
+      lastKey = '';
+      continue;
+    }
+    const marks: JMark[] = [{ type: 'textStyle', attrs: o.ts }, ...o.marks];
+    const key = JSON.stringify(marks);
+    const last = nodes[nodes.length - 1];
+    if (last && key === lastKey) last.text += o.text;
+    else {
+      nodes.push({ type: 'text', text: o.text, marks });
+      lastKey = key;
+    }
+  }
+  return nodes;
+}
+
 function lum(hex: string): number {
   const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(hex);
   if (!m) return 0;
@@ -269,6 +417,10 @@ interface Container extends Box {
   glyphs: Glyph[];
   images: PdfImage[];
   children: (TableModel | BoxModel)[];
+  /** 표에 쓰이지 않은 가로선 (구분선) */
+  rules?: Seg[];
+  /** 상자 바탕 그림 (글자가 위에 놓인 그림) */
+  bgImage?: PdfImage;
   /** 안쪽 왼쪽/오른쪽 여백 (pt) */
   padL: number;
   padR: number;
@@ -281,6 +433,10 @@ interface CellModel extends Container {
   rs: number;
   cs: number;
   borders: Partial<Record<'l' | 'r' | 't' | 'b', BorderSide | null>>;
+  /** 칸에 걸친 그림 (표 위에 겹친 직인 등) — 칸 배경으로 그 부분을 깐다 */
+  overlays?: PdfImage[];
+  /** 배치를 위해 만든 칸(단 나누기·떠 있는 그림): 세로 정렬은 늘 위 */
+  layout?: boolean;
 }
 
 interface TableModel extends Box {
@@ -325,7 +481,7 @@ function mergeSegs(segs: Seg[]): Seg[] {
         if (cur && pieces >= 4 && covered < (cur.b - cur.a) * 0.85) cur.style = covered / pieces <= Math.max(1.2, cur.w * 2.5) ? 'dotted' : 'dashed';
       };
       for (const s of g) {
-        if (cur && s.a <= cur.b + 3) {
+        if (cur && s.a <= cur.b + 3 && !!cur.ghost === !!s.ghost) {
           covered += Math.max(0, s.b - Math.max(s.a, cur.b));
           pieces++;
           if (s.b > cur.b) cur.b = s.b;
@@ -340,6 +496,40 @@ function mergeSegs(segs: Seg[]): Seg[] {
       }
       finish();
     }
+  }
+  return out;
+}
+
+/**
+ * 나중에 칠한 (불투명한) 사각형에 가려진 선 부분을 잘라 낸다. 칸 배경을 선 위에 칠해
+ * 아래 칸의 세로선이 제목 줄에서 안 보이게 한 표 등 — 가려진 선으로 칸을 나누지 않도록.
+ * 사각형 가장자리에 걸친 선(칸 테두리)은 남긴다.
+ */
+function occlude(segs: Seg[], fills: FillRect[]): Seg[] {
+  const covers = fills.filter((f) => !f.tile && f.z != null && f.color !== 'transparent' && f.x1 - f.x0 > 3 && f.y1 - f.y0 > 3);
+  if (!covers.length || segs.length * covers.length > 4e6) return segs;
+  const out: Seg[] = [];
+  for (const s of segs) {
+    let parts: [number, number][] = [[s.a, s.b]];
+    for (const f of covers) {
+      if (f.z! < (s.z ?? Infinity)) continue;
+      const inside = s.dir === 'h' ? s.pos > f.y0 + 0.6 && s.pos < f.y1 - 0.6 : s.pos > f.x0 + 0.6 && s.pos < f.x1 - 0.6;
+      if (!inside) continue;
+      const c0 = s.dir === 'h' ? f.x0 : f.y0;
+      const c1 = s.dir === 'h' ? f.x1 : f.y1;
+      const next: [number, number][] = [];
+      for (const [a, b] of parts) {
+        if (c1 <= a || c0 >= b) {
+          next.push([a, b]);
+          continue;
+        }
+        if (c0 > a) next.push([a, c0]);
+        if (c1 < b) next.push([c1, b]);
+      }
+      parts = next;
+      if (!parts.length) break;
+    }
+    for (const [a, b] of parts) if (b - a > 0.3) out.push({ ...s, a, b });
   }
   return out;
 }
@@ -437,7 +627,9 @@ function findTables(segsIn: Seg[], page: Box): { tables: TableModel[]; leftover:
     // 페이지 테두리: 바깥 선을 빼고 다시
     if (area(bb) > pageArea * 0.55 && depth < 2) {
       const rest = segs.filter((s) => !(s.dir === 'h' ? Math.abs(s.pos - bb.y0) < 3 || Math.abs(s.pos - bb.y1) < 3 : Math.abs(s.pos - bb.x0) < 3 || Math.abs(s.pos - bb.x1) < 3));
-      if (rest.length < segs.length) {
+      // 안쪽 가로선이 바깥 세로선에 닿아 있으면 쪽 테두리가 아니라 쪽을 채운 표의 테두리다
+      const touching = rest.filter((s) => s.dir === 'h' && (Math.abs(s.a - bb.x0) < 3 || Math.abs(s.b - bb.x1) < 3)).length;
+      if (rest.length < segs.length && touching < 2) {
         for (const c of components(rest)) queue.push({ segs: c, depth: depth + 1 });
         continue;
       }
@@ -481,7 +673,7 @@ function findTables(segsIn: Seg[], page: Box): { tables: TableModel[]; leftover:
           rs++;
         }
         for (let i = r; i < r + rs; i++) for (let k = c; k < c + cs; k++) taken[i][k] = true;
-        const side = (s: Seg | null): BorderSide | null => (s ? { w: round(Math.max(0.1, Math.min(5, (s.w * 25.4) / 72)), 2), c: normHex(s.color), s: s.style || 'solid' } : null);
+        const side = (s: Seg | null): BorderSide | null => (s && !s.ghost ? { w: round(Math.max(0.1, Math.min(5, (s.w * 25.4) / 72)), 2), c: normHex(s.color), s: s.style || 'solid' } : null);
         // 한 변 전체에 걸친 선만 테두리로 본다
         const topS = sideSeg(c, cs, (k) => hSeg(r, k));
         const botS = sideSeg(c, cs, (k) => hSeg(r + rs, k));
@@ -516,7 +708,7 @@ function sideSeg(start: number, n: number, get: (k: number) => Seg | null): Seg 
   for (let k = start; k < start + n; k++) {
     const s = get(k);
     if (!s) return null;
-    if (!first || s.w > first.w) first = s;
+    if (!first || (first.ghost && !s.ghost) || (!!first.ghost === !!s.ghost && s.w > first.w)) first = s;
   }
   return first;
 }
@@ -580,6 +772,86 @@ function mergeTiles(tilesIn: FillRect[]): FillRect[] {
   return out;
 }
 
+/** 도형 그림의 ref 표시 (reader 가 도형만 그린 쪽에서 잘라 낸다) */
+export const VECTOR_REF = '__kite_vector__';
+
+/** 도형 범위들을 서로 가까운 것끼리 묶어 그림 영역으로 */
+function vectorImages(vs: { x0: number; y0: number; x1: number; y1: number; light?: boolean }[], pageArea: number): PdfImage[] {
+  // 아주 연한 색으로 그린 것(워터마크·바탕 무늬)은 살리지 않는다
+  const list = vs.filter((v) => !v.light).slice(0, 20000);
+  if (!list.length) return [];
+  const parent = list.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const G = 8;
+  const gap = 1.5;
+  const grid = new Map<string, number[]>();
+  list.forEach((b, i) => {
+    for (let gx = Math.floor((b.x0 - gap) / G); gx <= Math.floor((b.x1 + gap) / G); gx++)
+      for (let gy = Math.floor((b.y0 - gap) / G); gy <= Math.floor((b.y1 + gap) / G); gy++) {
+        const k = gx + ',' + gy;
+        const cell = grid.get(k);
+        if (cell) {
+          for (const j of cell.length > 300 ? cell.slice(-300) : cell) {
+            const o = list[j];
+            if (b.x0 <= o.x1 + gap && o.x0 <= b.x1 + gap && b.y0 <= o.y1 + gap && o.y0 <= b.y1 + gap) {
+              const ra = find(i);
+              const rb = find(j);
+              if (ra !== rb) parent[ra] = rb;
+            }
+          }
+          cell.push(i);
+        } else grid.set(k, [i]);
+      }
+  });
+  const groups = new Map<number, { x0: number; y0: number; x1: number; y1: number }>();
+  list.forEach((b, i) => {
+    const r = find(i);
+    const g = groups.get(r);
+    if (!g) groups.set(r, { ...b });
+    else {
+      g.x0 = Math.min(g.x0, b.x0);
+      g.y0 = Math.min(g.y0, b.y0);
+      g.x1 = Math.max(g.x1, b.x1);
+      g.y1 = Math.max(g.y1, b.y1);
+    }
+  });
+  // 같은 줄 높이의 조각(윤곽선으로 그린 글자의 획·글자들)은 글자 간격만큼 떨어져 있어도 한 덩어리로
+  let boxes = [...groups.values()];
+  if (boxes.length <= 3000) {
+    let merged = true;
+    while (merged) {
+      merged = false;
+      boxes.sort((a, b) => a.x0 - b.x0);
+      for (let i = 0; i < boxes.length && !merged; i++)
+        for (let j = i + 1; j < boxes.length; j++) {
+          const a = boxes[i];
+          const b = boxes[j];
+          const ha = a.y1 - a.y0;
+          const hb = b.y1 - b.y0;
+          const maxGap = Math.min(8, Math.max(ha, hb) * 0.6);
+          if (b.x0 - a.x1 > maxGap) break;
+          if (overlap(a.y0, a.y1, b.y0, b.y1) < Math.min(ha, hb) * 0.5) continue;
+          a.x0 = Math.min(a.x0, b.x0);
+          a.y0 = Math.min(a.y0, b.y0);
+          a.x1 = Math.max(a.x1, b.x1);
+          a.y1 = Math.max(a.y1, b.y1);
+          boxes.splice(j, 1);
+          merged = true;
+          break;
+        }
+    }
+  }
+  const out: PdfImage[] = [];
+  for (const g of boxes) {
+    // 너무 작은 점·티끌은 버린다 (1.5pt 미만)
+    if (g.x1 - g.x0 < 1.5 && g.y1 - g.y0 < 1.5) continue;
+    if (area(g) > pageArea * 0.95) continue;
+    out.push({ ...g, ref: VECTOR_REF });
+    if (out.length >= 300) break;
+  }
+  return out;
+}
+
 // ---------------- 메인 ----------------
 export interface PageLayout {
   blocks: JNode[];
@@ -604,13 +876,44 @@ export function analyzePage(pc: PageContent) {
       glyphs = glyphs.map((g) => (g.invisible ? { ...g, invisible: false, color: '#000000' } : g));
     } else glyphs = glyphs.filter((g) => !g.invisible);
   }
-  // 글자가 있는 페이지의 전면 배경 그림은 제외
-  if (glyphs.length > 20) images = images.filter((im) => area(im) < pageArea * 0.7);
+  // 표·상자·선으로 옮기지 못한 도형(화살표·아이콘·윤곽선 글씨 등)은 덩어리로 묶어 그림으로 살린다
+  images = images.concat(
+    vectorImages(pc.vectors || [], pageArea).filter((v) => {
+      // 바탕 장식(글자가 많이 올라앉은 큰 도형)은 버린다 — 글 사이에 끼어 내용을 민다
+      if (area(v) < pageArea * 0.2) return true;
+      return glyphs.filter((g) => g.ch.trim() && containsPt(v, g.x + g.w / 2, g.y - g.size * 0.3)).length < 10;
+    }),
+  );
+  // 글자가 있는 페이지의 전면 배경 그림은 본문에서 빼고 쪽 배경으로 (스캔 위 투명 글자는 위에서 이미 뺐다)
+  let background: PdfImage | null = null;
+  if (glyphs.length > 20) {
+    const bgs = images.filter((im) => area(im) >= pageArea * 0.7 && im.ref !== VECTOR_REF);
+    if (bgs.length) background = bgs.sort((a, b) => area(b) - area(a))[0];
+    images = images.filter((im) => area(im) < pageArea * 0.7);
+  }
 
-  let segs = mergeSegs(pc.segs.filter((s) => s.color !== '#ffffff' && s.color !== '#FFFFFF'));
+  let segs = mergeSegs(occlude(pc.segs, pc.fills).filter((s) => s.color !== '#ffffff' && s.color !== '#FFFFFF'));
   // 합친 뒤에도 선이 너무 많으면(비정상 문서) 표 찾기를 하지 않는다
   if (segs.length > 3000) segs = [];
-  const { tables, leftover } = findTables(segs, page);
+  let { tables, leftover } = findTables(segs, page);
+  // 배경색으로만 나뉜 칸(파란 제목 칸 | 값 칸 처럼 사이에 선이 없는 표): 행 선에 맞춰 칠한 사각형의
+  // 가장자리를 (그리지 않는) 칸 경계로 더해 다시 찾는다
+  const ghosts: Seg[] = [];
+  for (const t of tables) {
+    const near = (v: number, arr: number[]) => arr.some((a) => Math.abs(a - v) < 2);
+    for (const f of pc.fills) {
+      if (f.tile || f.color === 'transparent' || /^#fff(fff)?$/i.test(f.color) || f.x1 - f.x0 < 4 || f.y1 - f.y0 < 4) continue;
+      if (!containsBox(t, f, 2) || area(f) > area(t) * 0.9) continue;
+      if (!near(f.y0, t.ys) || !near(f.y1, t.ys)) continue;
+      const a0 = near(f.x0, t.xs);
+      const a1 = near(f.x1, t.xs);
+      if (a0 === a1) continue; // 양쪽이 다 맞으면 이미 칸, 다 안 맞으면 칸 안의 강조 상자
+      const x = a0 ? f.x1 : f.x0;
+      ghosts.push({ dir: 'v', pos: x, a: f.y0, b: f.y1, w: 0.1, color: '#000000', ghost: true });
+    }
+  }
+  if (ghosts.length && ghosts.length < 500) ({ tables, leftover } = findTables(mergeSegs([...segs, ...ghosts]), page));
+  leftover = leftover.filter((s) => !s.ghost);
 
   // 채운 사각형: 타일 합치기, 흰색·페이지 전체 제외
   const plain = pc.fills.filter((f) => !f.tile);
@@ -668,6 +971,40 @@ export function analyzePage(pc: PageContent) {
     boxes.push({ type: 'box', x0: f.x0, y0: f.y0, x1: f.x1, y1: f.y1, inner: newContainer('box', f, normHex(f.color)) });
   }
 
+  // 글자가 위에 놓인 그림(머리 장식·사진 위 글씨, 문장부호만 그림으로 찍은 줄): 그림과 겹친 글줄을
+  // 감싸는 상자를 만들고 그림은 그 안의 제자리에 바탕으로 깐다 (그림이 따로 한 줄을 차지하지 않게)
+  const pageLines = images.length ? buildLines(glyphs, new Set()) : [];
+  for (const im of images.slice()) {
+    if (area(im) > pageArea * 0.6 || im.x1 - im.x0 < 3 || im.y1 - im.y0 < 3) continue;
+    // 표에 걸치거나(직인 → 칸 배경) 다른 상자 안에 다 들어가는 그림은 그대로
+    if (tables.some((t) => overlap(t.x0, t.x1, im.x0, im.x1) > 1 && overlap(t.y0, t.y1, im.y0, im.y1) > 1) || boxes.some((b) => containsBox(b, im, 2))) continue;
+    const hit = pageLines.filter((l) => overlap(l.y - l.size, l.y + l.size * 0.3, im.y0, im.y1) > 1 && l.glyphs.some((g) => g.ch.trim() && overlap(g.x, g.x + g.w, im.x0, im.x1) > 0.5));
+    if (!hit.length) continue;
+    // 그림 안에 글자가 여럿 있거나(바탕 그림), 글줄만한 그림(문장부호를 그림으로 찍은 줄)일 때만.
+    // 글보다 훨씬 큰 그림(서명 옆 직인 등)은 상자가 커져 아래가 밀리므로 그대로 둔다
+    const inside = glyphs.filter((g) => g.ch.trim() && containsPt(im, g.x + g.w / 2, g.y - g.size * 0.3)).length;
+    if (inside < 3 && im.y1 - im.y0 > Math.max(...hit.map((l) => l.size)) * 1.6) continue;
+    // 같은 줄 높이에 있는 다른 작은 그림(줄 앞의 Ⅰ 등)도 상자에 넣는다 — 상자 안에서 그 줄에 끼워진다
+    const sz = Math.max(...hit.map((l) => l.size));
+    const bandY0 = Math.min(...hit.map((l) => l.y - l.size * 1.4));
+    const bandY1 = Math.max(...hit.map((l) => l.y + l.size * 0.6));
+    const lx0 = Math.min(im.x0, ...hit.map((l) => l.x0));
+    const lx1 = Math.max(im.x1, ...hit.map((l) => l.x1));
+    const mates = images.filter((o) => o !== im && o.y0 >= bandY0 && o.y1 <= bandY1 && o.x1 >= lx0 - sz * 6 && o.x0 <= lx1 + sz * 6);
+    const bb = {
+      x0: Math.min(lx0, ...mates.map((o) => o.x0)) - 0.5,
+      x1: Math.max(lx1, ...mates.map((o) => o.x1)) + 0.5,
+      y0: Math.min(im.y0, ...hit.map((l) => l.y - l.size * 1.45)),
+      y1: Math.max(im.y1, ...hit.map((l) => l.y + l.size * 0.75)),
+    };
+    // 이미 만든 상자와 겹치면(같은 줄의 다른 그림) 그 상자를 넓힐 수는 없으므로 건너뛴다
+    if (boxes.some((b) => overlap(b.x0, b.x1, bb.x0, bb.x1) > 0 && overlap(b.y0, b.y1, bb.y0, bb.y1) > 0)) continue;
+    const inner = newContainer('box', bb, null);
+    inner.bgImage = im;
+    boxes.push({ type: 'box', ...bb, inner });
+    images = images.filter((o) => o !== im);
+  }
+
   // 표 바로 위/아래에 붙은 같은 폭의 배경 띠(머리글 줄 등)는 표의 행으로 합친다
   for (let bi = boxes.length - 1; bi >= 0; bi--) {
     const b = boxes[bi];
@@ -687,20 +1024,28 @@ export function analyzePage(pc: PageContent) {
     const row = above ? 0 : t.ys.length - 2;
     const y0 = above ? b.y0 : t.ys[t.ys.length - 2];
     const y1 = above ? t.ys[1] : b.y1;
-    for (let c = 0; c < nC; c++)
-      t.cells.push({ kind: 'cell', row, col: c, rs: 1, cs: 1, x0: t.xs[c], x1: t.xs[c + 1], y0, y1, bg: color, glyphs: [], images: [], children: [], padL: 0, padR: 0, borders: {} });
+    // 띠는 칸 구분이 없으므로 모든 열을 합친 한 칸으로 (열마다 나누면 띠의 글이 칸마다 끊긴다)
+    t.cells.push({ kind: 'cell', row, col: 0, rs: 1, cs: nC, x0: t.xs[0], x1: t.xs[nC], y0, y1, bg: color, glyphs: [], images: [], children: [], padL: 0, padR: 0, borders: {} });
     t.cells.sort((a, b2) => a.row - b2.row || a.col - b2.col);
     boxes.splice(bi, 1);
   }
 
   // 밑줄: 표에 쓰이지 않은 가로선 바로 위의 글자
   const underlined = new Set<Glyph>();
+  const rules: Seg[] = [];
   for (const s of leftover.length * glyphs.length > 5e6 ? [] : leftover) {
-    if (s.dir !== 'h' || s.w > 2) continue;
-    for (const g of glyphs) {
-      const d = s.pos - g.y;
-      if (d >= -0.5 && d <= g.size * 0.3 && g.x + g.w / 2 >= s.a && g.x + g.w / 2 <= s.b && s.b - s.a < g.size * 60) underlined.add(g);
-    }
+    if (s.dir !== 'h') continue;
+    let under = false;
+    if (s.w <= 2)
+      for (const g of glyphs) {
+        const d = s.pos - g.y;
+        if (d >= -0.5 && d <= g.size * 0.3 && g.x + g.w / 2 >= s.a && g.x + g.w / 2 <= s.b && s.b - s.a < g.size * 60) {
+          underlined.add(g);
+          under = true;
+        }
+      }
+    // 밑줄이 아닌 긴 가로선은 구분선으로 그린다
+    if (!under && s.b - s.a > 40 && s.w <= 6 && rules.length < 200) rules.push(s);
   }
 
   // 그릇 트리: 페이지 > (표 셀 | 상자) ...
@@ -744,11 +1089,52 @@ export function analyzePage(pc: PageContent) {
         home = c;
         break;
       }
+    // 어느 칸에도 다 들어가지 않고 표에 걸친 그림(직인 등): 겹치는 칸마다 배경으로
+    if (home === pageC && area(im) < pageArea * 0.25) {
+      const t = tables.find((t) => overlap(t.x0, t.x1, im.x0, im.x1) * overlap(t.y0, t.y1, im.y0, im.y1) > area(im) * 0.3);
+      if (t) {
+        for (const c of t.cells) if (overlap(c.x0, c.x1, im.x0, im.x1) > 0.5 && overlap(c.y0, c.y1, im.y0, im.y1) > 0.5) (c.overlays ||= []).push(im);
+        continue;
+      }
+    }
     home.images.push(im);
   }
+  // 칸 안에서 글줄과 겹치는 그림(서명란의 직인 등)은 칸 배경으로 — 그림이 한 줄을 차지해 아래가 밀리지 않게
+  for (const t of tables)
+    for (const c of t.cells) {
+      if (!c.images.length || !c.glyphs.length) continue;
+      const ls = buildLines(c.glyphs, new Set());
+      c.images = c.images.filter((im) => {
+        const h = im.y1 - im.y0;
+        const hits = ls.filter((l) => overlap(l.y - l.size, l.y + l.size * 0.3, im.y0, im.y1) > 1);
+        if (!hits.length) return true;
+        // 글자 위에 겹친 그림(문장부호만 그림으로 찍은 줄 등)은 배경으로, 글자 사이에 놓인 글자만한 그림은 글줄에 끼운다
+        const overText = hits.some((l) => l.glyphs.some((g) => g.ch.trim() && overlap(g.x, g.x + g.w, im.x0, im.x1) > 0.5));
+        if (!overText && hits.every((l) => h <= l.size * 1.3 || (im.y0 >= l.y - l.size * 1.4 && im.y1 <= l.y + l.size * 0.6))) return true;
+        (c.overlays ||= []).push(im);
+        return false;
+      });
+    }
+  for (const r of rules) {
+    let home: Container = pageC;
+    for (const c of containers)
+      if (containsPt(c, (r.a + r.b) / 2, r.pos, 0.5) && r.b - r.a <= c.x1 - c.x0 + 2) {
+        home = c;
+        break;
+      }
+    (home.rules ||= []).push(r);
+  }
+  // 쪽 번호 줄은 배치(단 나누기·떠 있는 그림)보다 먼저 뺀다 — 글 칸에 끌려 들어가 칸이 쪽 끝까지 늘지 않게
+  const pageNum = stripPageNumber(pageC, pc.height);
+  const cols = columnsByRule(pageC, leftover);
+  floatImages(pageC);
   splitColumns(pageC);
+  for (const c of cols) {
+    floatImages(c);
+    splitColumns(c);
+  }
   // 빈 표(글자·그림 없는 장식 테두리)는 버린다
-  const hasContent = (c: Container): boolean => c.glyphs.length > 0 || c.images.length > 0 || c.children.some((ch) => (ch.type === 'table' ? ch.cells.some(hasContent) : hasContent(ch.inner)));
+  const hasContent = (c: Container): boolean => c.glyphs.length > 0 || c.images.length > 0 || !!c.bgImage || !!(c as CellModel).overlays?.length || c.children.some((ch) => (ch.type === 'table' ? ch.cells.some(hasContent) : hasContent(ch.inner)));
   const prune = (c: Container) => {
     c.children = c.children.filter((ch) => (ch.type === 'table' ? ch.cells.some(hasContent) : hasContent(ch.inner)));
     for (const ch of c.children) {
@@ -757,7 +1143,144 @@ export function analyzePage(pc: PageContent) {
     }
   };
   prune(pageC);
-  return { pageC, underlined };
+  return { pageC, underlined, background, pageNum };
+}
+
+/**
+ * 긴 세로 구분선(시험지·신문처럼 두 단 사이의 선)으로 나뉜 구간을 테두리 없는 2칸 표로 만든다.
+ * 선의 세로 범위 안에 있는 글자·그림·표를 선의 왼쪽/오른쪽 칸으로 옮기고, 선은 왼쪽 칸의 오른쪽 테두리로 그린다.
+ */
+function columnsByRule(pageC: Container, leftover: Seg[]): CellModel[] {
+  const H = pageC.y1 - pageC.y0;
+  const out: CellModel[] = [];
+  const rules = leftover.filter((s) => s.dir === 'v' && s.b - s.a > H * 0.3).sort((a, b) => a.pos - b.pos);
+  for (const r of rules) {
+    const inBand = (y0: number, y1: number) => y0 >= r.a - 4 && y1 <= r.b + 4;
+    const gs = pageC.glyphs.filter((g) => inBand(g.y - g.size, g.y));
+    const leftN = gs.filter((g) => g.x + g.w <= r.pos).length;
+    const rightN = gs.filter((g) => g.x >= r.pos).length;
+    // 양쪽에 글이 있고, 선을 가로지르는 글자가 거의 없어야 단 구분선
+    if (leftN < 20 || rightN < 20 || gs.length - leftN - rightN > gs.length * 0.02) continue;
+    const xs0 = Math.min(...gs.map((g) => g.x), ...pageC.images.filter((im) => inBand(im.y0, im.y1)).map((im) => im.x0), ...pageC.children.filter((ch) => inBand(ch.y0, ch.y1)).map((ch) => ch.x0));
+    const xs1 = Math.max(...gs.map((g) => g.x + g.w), ...pageC.images.filter((im) => inBand(im.y0, im.y1)).map((im) => im.x1), ...pageC.children.filter((ch) => inBand(ch.y0, ch.y1)).map((ch) => ch.x1));
+    const y0 = r.a;
+    const y1 = r.b;
+    const side: BorderSide = { w: round(Math.max(0.1, Math.min(5, (r.w * 25.4) / 72)), 2), c: normHex(r.color), s: r.style || 'solid' };
+    const mk = (cx0: number, cx1: number, col: number): CellModel => ({ kind: 'cell', row: 0, col, rs: 1, cs: 1, x0: cx0, x1: cx1, y0, y1, bg: null, glyphs: [], images: [], children: [], padL: 0, padR: 0, borders: col === 0 ? { r: side } : {}, layout: true });
+    const left = mk(Math.min(xs0 - 1, r.pos - 10), r.pos, 0);
+    const right = mk(r.pos, Math.max(xs1 + 1, r.pos + 10), 1);
+    pageC.glyphs = pageC.glyphs.filter((g) => {
+      if (!inBand(g.y - g.size, g.y)) return true;
+      (g.x + g.w / 2 < r.pos ? left : right).glyphs.push(g);
+      return false;
+    });
+    pageC.images = pageC.images.filter((im) => {
+      if (!inBand(im.y0, im.y1)) return true;
+      ((im.x0 + im.x1) / 2 < r.pos ? left : right).images.push(im);
+      return false;
+    });
+    pageC.children = pageC.children.filter((ch) => {
+      if (!inBand(ch.y0, ch.y1)) return true;
+      ((ch.x0 + ch.x1) / 2 < r.pos ? left : right).children.push(ch);
+      return false;
+    });
+    pageC.rules = (pageC.rules || []).filter((rl) => {
+      if (!inBand(rl.pos, rl.pos)) return true;
+      ((rl.a + rl.b) / 2 < r.pos ? left : right).rules = [...(((rl.a + rl.b) / 2 < r.pos ? left : right).rules || []), rl];
+      return false;
+    });
+    pageC.children.push({ type: 'table', x0: left.x0, x1: right.x1, y0, y1, xs: [left.x0, r.pos, right.x1], ys: [y0, y1], cells: [left, right] });
+    out.push(left, right);
+  }
+  return out;
+}
+
+/** y 아래에서 처음 나오는 내용(표·상자·그림·글줄)의 위끝 */
+function nextTop(c: Container, lines: TLine[], skip: TLine[], y: number): number {
+  let t = Infinity;
+  for (const ch of c.children) if (ch.y0 > y) t = Math.min(t, ch.y0);
+  for (const im of c.images) if (im.y0 > y) t = Math.min(t, im.y0);
+  for (const r of c.rules || []) if (r.pos > y) t = Math.min(t, r.pos - r.w / 2);
+  for (const l of lines) if (!skip.includes(l) && l.y - l.size > y) t = Math.min(t, l.y - l.size * 1.2);
+  return t;
+}
+
+/**
+ * 글 옆에 놓인 그림(떠 있는 그림)을 테두리 없는 2칸 표로 흉내 낸다: 한 칸에 그림, 다른 칸에 그림과
+ * 세로 범위가 겹치는 글줄(과 그 아래 같은 쪽에서 이어지는 줄). 편집기에는 떠 있는 개체가 없어서
+ * 그대로 두면 그림이 글 사이에 한 줄을 차지해 아래 내용이 모두 밀린다.
+ */
+function floatImages(pageC: Container) {
+  const W = pageC.x1 - pageC.x0;
+  for (const im of pageC.images.slice().sort((a, b) => a.y0 - b.y0)) {
+    if (!pageC.images.includes(im) || im.x1 - im.x0 > W * 0.6) continue;
+    const lines = buildLines(pageC.glyphs, new Set());
+    const top = (l: TLine) => l.y - l.size;
+    const bot = (l: TLine) => l.y + l.size * 0.3;
+    const band = lines.filter((l) => overlap(top(l), bot(l), im.y0, im.y1) > 1);
+    // 칸 위끝: 첫 줄의 줄 상자가 들어가도록 (줄 상자는 기준선에서 줄 간격의 절반 + 0.38배 위)
+    const boxTop = (l: TLine) => l.y - l.size * 1.45;
+    if (!band.length) continue;
+    // 글자 크기만한 그림(보기 번호·아이콘)은 글줄 안에 끼울 것이므로 떠 있는 그림이 아니다
+    if (im.y1 - im.y0 <= Math.max(...band.map((l) => l.size)) * 1.3 || band.some((l) => im.y0 >= l.y - l.size * 1.4 && im.y1 <= l.y + l.size * 0.6)) continue;
+    // 글이 그림 위에 겹쳐 있으면(그림 위 글씨) 떠 있는 그림이 아니다
+    if (band.some((l) => overlap(l.x0, l.x1, im.x0, im.x1) > 1)) continue;
+    const right = band.filter((l) => l.x0 >= im.x1 - 1).length;
+    const left = band.filter((l) => l.x1 <= im.x0 + 1).length;
+    const side: 'r' | 'l' = right >= left ? 'r' : 'l';
+    const onSide = (l: TLine) => (side === 'r' ? l.x0 >= im.x1 - 1 : l.x1 <= im.x0 + 1);
+    let run = band.filter(onSide);
+    if (!run.length || run.length < band.length) continue;
+    // 그림 아래로 같은 쪽에서 이어지는 줄
+    const after = lines.filter((l) => top(l) > Math.max(...run.map(bot)) - 0.5).sort((a, b) => a.y - b.y);
+    for (const l of after) {
+      const prev = run[run.length - 1];
+      if (!onSide(l) || l.y - prev.y > Math.max(prev.size, l.size) * 3) break;
+      run.push(l);
+    }
+    run = run.sort((a, b) => a.y - b.y);
+    const y0 = Math.min(im.y0, boxTop(run[0])) - 0.5;
+    // 칸 아래끝: 마지막 줄의 줄 상자 + 칸 안 여백 (아래 내용과 겹치지 않게)
+    const lastY = Math.max(im.y1, ...run.map((l) => l.y));
+    const y1 = Math.max(im.y1, Math.min(Math.max(...run.map((l) => l.y + l.size * 0.75)) + 2.5, nextTop(pageC, lines, run, lastY) - 0.5));
+    // 같은 띠에서 그림 쪽에 있는 다른 그림도 함께
+    const ims = pageC.images.filter((o) => o === im || (o.y0 >= y0 - 1 && o.y1 <= y1 + 1 && (side === 'r' ? o.x1 <= im.x1 + 1 : o.x0 >= im.x0 - 1)));
+    const ix0 = Math.min(...ims.map((o) => o.x0));
+    const ix1 = Math.max(...ims.map((o) => o.x1));
+    const tx0 = Math.min(...run.map((l) => l.x0));
+    const tx1 = Math.max(...run.map((l) => l.x1));
+    const mk = (cx0: number, cx1: number, col: number): CellModel => ({ kind: 'cell', row: 0, col, rs: 1, cs: 1, x0: cx0, x1: cx1, y0, y1, bg: null, glyphs: [], images: [], children: [], padL: 0, padR: 0, borders: {}, layout: true });
+    let imgCell: CellModel;
+    let txtCell: CellModel;
+    if (side === 'r') {
+      imgCell = mk(ix0 - 1, tx0 - 1, 0);
+      txtCell = mk(tx0 - 1, Math.max(tx1 + 1, pageC.x1), 1);
+    } else {
+      txtCell = mk(Math.min(tx0 - 1, pageC.x0), ix0 - 1, 0);
+      imgCell = mk(ix0 - 1, ix1 + 1, 1);
+    }
+    if (txtCell.x1 - txtCell.x0 < 10 || imgCell.x1 - imgCell.x0 < 4) continue;
+    const inRun = new Set(run.flatMap((l) => l.glyphs));
+    pageC.glyphs = pageC.glyphs.filter((g) => {
+      if (!inRun.has(g)) return true;
+      txtCell.glyphs.push(g);
+      return false;
+    });
+    pageC.images = pageC.images.filter((o) => {
+      if (!ims.includes(o)) return true;
+      imgCell.images.push(o);
+      return false;
+    });
+    const cells = side === 'r' ? [imgCell, txtCell] : [txtCell, imgCell];
+    const t: TableModel = { type: 'table', x0: cells[0].x0, x1: cells[1].x1, y0, y1, xs: [cells[0].x0, cells[0].x1, cells[1].x1], ys: [y0, y1], cells };
+    // 글 쪽에 들어가는 상자/표도 옮긴다
+    pageC.children = pageC.children.filter((ch) => {
+      if (!containsBox(txtCell, ch, 2)) return true;
+      txtCell.children.push(ch);
+      return false;
+    });
+    pageC.children.push(t);
+  }
 }
 
 /**
@@ -816,12 +1339,12 @@ function splitColumns(pageC: Container) {
       continue;
     }
     const run = lines.slice(i, best.end + 1);
-    const y0 = Math.min(...run.map((l) => l.y - l.size * 1.0));
-    const y1 = Math.max(...run.map((l) => l.y + l.size * 0.3));
+    const y0 = Math.min(...run.map((l) => l.y - l.size * 1.45));
+    const y1 = Math.max(Math.max(...run.map((l) => l.y + l.size * 0.3)), Math.min(Math.max(...run.map((l) => l.y + l.size * 0.75)) + 2.5, nextTop(pageC, lines, run, Math.max(...run.map((l) => l.y))) - 0.5));
     const x0 = Math.min(...run.map((l) => l.x0));
     const x1 = Math.max(...run.map((l) => l.x1));
     const mid = (best.a + best.b) / 2;
-    const mk = (cx0: number, cx1: number, col: number): CellModel => ({ kind: 'cell', row: 0, col, rs: 1, cs: 1, x0: cx0, x1: cx1, y0, y1, bg: null, glyphs: [], images: [], children: [], padL: 0, padR: 0, borders: {} });
+    const mk = (cx0: number, cx1: number, col: number): CellModel => ({ kind: 'cell', row: 0, col, rs: 1, cs: 1, x0: cx0, x1: cx1, y0, y1, bg: null, glyphs: [], images: [], children: [], padL: 0, padR: 0, borders: {}, layout: true });
     const left = mk(x0 - 1, mid, 0);
     const right = mk(mid, x1 + 1, 1);
     const inRun = new Set(run.flatMap((l) => l.glyphs));
@@ -894,6 +1417,13 @@ export function contentBounds(pageC: Container, underlined: Set<Glyph>): Box | n
     ys0.push(im.y0);
     ys1.push(im.y1);
   }
+  // 구분선(쪽 아래 바닥 선 등)도 내용 — 빼면 아래 여백 안에 들어가 다음 쪽으로 넘친다
+  for (const r of pageC.rules || []) {
+    xs0.push(r.a);
+    xs1.push(r.b);
+    ys0.push(r.pos - r.w / 2);
+    ys1.push(r.pos + r.w / 2 + 1);
+  }
   if (!xs0.length) return null;
   return { x0: Math.min(...xs0), x1: Math.max(...xs1), y0: Math.min(...ys0), y1: Math.max(...ys1) };
 }
@@ -903,6 +1433,7 @@ type Item =
   | { kind: 'table'; top: number; t: TableModel }
   | { kind: 'box'; top: number; b: BoxModel }
   | { kind: 'image'; top: number; ims: PdfImage[] }
+  | { kind: 'rule'; top: number; r: Seg }
   | { kind: 'row'; top: number; g: (TableModel | BoxModel)[] };
 
 const BULLET_RE = /^[\s]*([○●◦•·∙ㆍ\-–—□■◇◆▪▫▶▷►※*☐☑✓✔❍❏➢➤>]|\(?\d{1,2}[.)]|\(?[가-힣][.)]\s|[①-⑳]|[ⅰ-ⅹⅠ-Ⅹ][.)]?)/;
@@ -910,6 +1441,36 @@ const BULLET_RE = /^[\s]*([○●◦•·∙ㆍ\-–—□■◇◆▪▫▶▷�
 /** 그릇 하나의 내용을 블록 목록으로 */
 export async function renderContainer(c: Container, bounds: Box, ctx: LayoutCtx, underlined: Set<Glyph>, startY: number): Promise<{ blocks: JNode[]; endY: number }> {
   const lines = buildLines(c.glyphs, underlined);
+  // 글줄 안의 작은 그림은 그 줄에 끼운다 (글자처럼 자리에 맞춰 넣는다)
+  const restImages: PdfImage[] = [];
+  for (const im of c.images) {
+    const h = im.y1 - im.y0;
+    const cy = (im.y0 + im.y1) / 2;
+    const l = ctx.measure
+      ? lines.find(
+          (l) =>
+            // 글자만하거나, 그 줄의 줄 상자 안에 들어가는 그림
+            (h <= l.size * 1.3 || (im.y0 >= l.y - l.size * 1.4 && im.y1 <= l.y + l.size * 0.6)) &&
+            cy >= l.y - l.size &&
+            cy <= l.y + l.size * 0.3 &&
+            im.x0 >= l.x0 - l.size * 6 &&
+            im.x1 <= l.x1 + l.size * 6 &&
+            // 글자 사이 빈자리에 있어야 한다 (글자 위에 겹친 그림은 끼우지 않는다)
+            !l.glyphs.some((g) => g.ch.trim() && overlap(g.x, g.x + g.w, im.x0, im.x1) > 0.5),
+        )
+      : undefined;
+    const src = l ? await ctx.imageSrc(im) : null;
+    if (!l || !src) {
+      restImages.push(im);
+      continue;
+    }
+    const g: Glyph = { ch: '\ufffc', x: im.x0, y: l.y, w: im.x1 - im.x0, size: l.size, font: '', bold: false, italic: false, color: '#000000', spacing: 0, hscale: 100, invisible: false };
+    inlineImg.set(g, { im, src });
+    l.glyphs.push(g);
+    l.glyphs.sort((a, b) => a.x - b.x);
+    l.x0 = Math.min(l.x0, im.x0);
+    l.x1 = Math.max(l.x1, im.x1);
+  }
   // 각 줄에서 다음 줄까지의 기준선 간격 (한 줄짜리 문단의 줄 높이 상한)
   const nextGap = new Map<TLine, number>();
   for (let k = 0; k + 1 < lines.length; k++) {
@@ -936,13 +1497,14 @@ export async function renderContainer(c: Container, bounds: Box, ctx: LayoutCtx,
   }
   // 세로 범위가 겹치는 그림들은 한 줄에 나란히
   const rows: PdfImage[][] = [];
-  for (const im of c.images.slice().sort((a, b) => a.y0 - b.y0)) {
+  for (const im of restImages.sort((a, b) => a.y0 - b.y0)) {
     // 높이가 비슷하고 세로 범위가 대부분 겹칠 때만 (큰 바탕 그림이 모두를 한 줄로 묶지 않도록)
     const row = rows.find((r) => r.every((o) => overlap(o.y0, o.y1, im.y0, im.y1) > Math.max(o.y1 - o.y0, im.y1 - im.y0) * 0.6));
     if (row) row.push(im);
     else rows.push([im]);
   }
   for (const r of rows) items.push({ kind: 'image', top: Math.min(...r.map((im) => im.y0)), ims: r.sort((a, b) => a.x0 - b.x0) });
+  for (const r of c.rules || []) items.push({ kind: 'rule', top: r.pos - r.w / 2, r });
   items.sort((a, b) => a.top - b.top);
 
   const L = bounds.x0;
@@ -958,7 +1520,8 @@ export async function renderContainer(c: Container, bounds: Box, ctx: LayoutCtx,
   };
   const pushSpacer = (gap: number) => {
     if (gap < 2) return;
-    if (prevBlock && prevBlock.type === 'paragraph') {
+    // 문단 간격은 안쪽 여백으로 그려지므로, 배경색을 칠한 문단(구분선)에는 붙이지 않는다
+    if (prevBlock && prevBlock.type === 'paragraph' && !prevBlock.attrs?.paraBg) {
       const a = (prevBlock.attrs ||= {});
       a.spaceAfter = round((a.spaceAfter || 0) + Math.min(gap, 400), 1);
     } else blocks.push(paragraph({ lineHeight: `${round(Math.min(gap, 400), 1)}pt`, fontSize: 1 }, []));
@@ -980,7 +1543,7 @@ export async function renderContainer(c: Container, bounds: Box, ctx: LayoutCtx,
       if (ng != null) lh = Math.max(size * 1.05, Math.min(lh, ng));
     }
     // 셀: 행 높이를 넘지 않도록 줄 간격을 줄인다
-    if (c.kind === 'cell') {
+    if (c.kind === 'cell' || c.kind === 'box') {
       const avail = (c.y1 - c.y0 - 2 * CELL_PADV) / p.lines.length;
       if (lh > avail) lh = Math.max(size * 1.05, avail);
     }
@@ -988,17 +1551,27 @@ export async function renderContainer(c: Container, bounds: Box, ctx: LayoutCtx,
     const firstX = first.x0 - L;
     const contX = p.lines.length > 1 ? Math.min(...p.lines.slice(1).map((l) => l.x0)) - L : firstX;
     const narrow = c.kind !== 'page';
-    const align = lineAlign(first, L, R, narrow);
+    let align = lineAlign(first, L, R, narrow);
+    let allCenter = p.lines.length > 1 && p.lines.every((l) => lineAlign(l, L, R, narrow) === 'center');
+    // 글자를 PDF 자리에 맞출 때: 정렬로 놓이는 자리가 PDF 와 1pt 넘게 다르면 들여쓰기로 맞춘다
+    if (ctx.measure) {
+      const off = (l: TLine, a: string | null) => (a === 'center' ? Math.abs((l.x0 + l.x1) / 2 - (L + R) / 2) : a === 'right' ? Math.abs(R - l.x1) : 0);
+      if (align && off(first, align) > 1) align = null;
+      if (allCenter && p.lines.some((l) => off(l, 'center') > 1)) allCenter = false;
+    }
     if (p.lines.length === 1 && align) attrs.textAlign = align;
-    else if (p.lines.length > 1 && p.lines.every((l) => lineAlign(l, L, R, narrow) === 'center')) attrs.textAlign = 'center';
+    else if (allCenter) attrs.textAlign = 'center';
     if (!attrs.textAlign) {
       // 한글 의미: indentLeft 는 첫 줄과 나머지 줄 중 왼쪽 것, textIndent 가 음수면 내어쓰기
       const leftX = Math.min(firstX, contX);
       if (leftX > 1) attrs.indentLeft = round(leftX, 1);
+      // 글자를 PDF 자리에 맞출 때: 칸 안 여백보다 왼쪽에서 시작하는 줄(칸 끝에 붙은 ① 등)은 음수 들여쓰기로
+      else if (ctx.measure && leftX < -0.5) attrs.indentLeft = round(Math.max(-20, leftX), 1);
       if (Math.abs(firstX - contX) > 1) attrs.textIndent = round(firstX - contX, 1);
       if (p.lines.length > 1) {
         const maxX1 = Math.max(...p.lines.slice(0, -1).map((l) => l.x1));
-        if (R - maxX1 > size * 1.2) attrs.indentRight = round(R - maxX1, 1);
+        // 강제 줄 나눔으로 줄을 맞출 때는 측정 오차로 줄이 넘지 않도록 여유를 둔다
+        if (R - maxX1 > size * 1.2) attrs.indentRight = round(Math.max(0, R - maxX1 - (ctx.measure ? 3 : 0)), 1);
       } else if (first.x1 > R + 1) {
         // 한 줄인데 영역을 조금 넘으면 줄바꿈되지 않도록 자간을 약간 줄인다 (생략)
       }
@@ -1009,8 +1582,19 @@ export async function renderContainer(c: Container, bounds: Box, ctx: LayoutCtx,
     const sz = Math.round(size * 2) / 2;
     if (sz !== 10) attrs.fontSize = sz;
     const inline: JNode[] = [];
-    const spacing = fitSpacing(p.lines, ctx, attrs.textAlign === 'center' ? R - L : R - L - Math.max(0, first.x0 - L));
-    for (const l of p.lines) {
+    if (ctx.measure) {
+      // PDF 와 같은 줄바꿈: 줄마다 강제 줄 나눔, 낱말 위치는 자간으로 맞춘다
+      for (const l of p.lines) {
+        const Rp = R - (attrs.indentRight || 0);
+        const maxW = (attrs.textAlign ? Rp - L : Rp - Math.max(L, l.x0)) - 1;
+        const li = exactLineInline(l, c.bg, ctx.measure, maxW);
+        if (!li.length) continue;
+        if (inline.length) inline.push({ type: 'hardBreak' });
+        inline.push(...li);
+      }
+    }
+    const spacing = ctx.measure ? null : fitSpacing(p.lines, ctx, attrs.textAlign === 'center' ? R - L : R - L - Math.max(0, first.x0 - L));
+    for (const l of ctx.measure ? [] : p.lines) {
       const li = lineInline(l, c.bg, spacing);
       if (inline.length && li.length) {
         const prevT = inline[inline.length - 1];
@@ -1023,7 +1607,8 @@ export async function renderContainer(c: Container, bounds: Box, ctx: LayoutCtx,
     const node = paragraph(attrs, inline);
     blocks.push(node);
     prevBlock = node;
-    prevBottom = last.y - ascentOff(lh, size) + lh;
+    // 앞 내용과 겹쳐 아래로 밀려 놓였으면 그 자리 기준으로 (밀린 만큼이 뒤로 쌓이지 않게)
+    prevBottom = Math.max(top, prevBottom) + (last.y - first.y) + lh;
   };
 
   for (const it of items) {
@@ -1041,6 +1626,22 @@ export async function renderContainer(c: Container, bounds: Box, ctx: LayoutCtx,
       continue;
     }
     flushPara();
+    if (it.kind === 'rule') {
+      // 구분선: 선 두께만한 빈 문단에 배경색 (들여쓰기로 선의 시작/끝을 맞춘다)
+      const r = it.r;
+      const h = Math.max(0.5, Math.min(6, r.w));
+      const attrs: Record<string, any> = { lineHeight: `${round(h, 2)}pt`, fontSize: 1, paraBg: normHex(r.color) };
+      if (r.a - L > 0.5) attrs.indentLeft = round(r.a - L, 1);
+      if (R - r.b > 0.5) attrs.indentRight = round(R - r.b, 1);
+      // 위 간격은 빈 문단으로 (배경색이 간격까지 칠해지지 않게)
+      const gap = gapBefore(it.top);
+      if (gap >= 0.3) blocks.push(paragraph({ lineHeight: `${round(Math.min(gap, 400), 1)}pt`, fontSize: 1 }, []));
+      const node = paragraph(attrs, []);
+      blocks.push(node);
+      prevBlock = node;
+      prevBottom = Math.max(it.top, prevBottom) + h;
+      continue;
+    }
     if (it.kind === 'image') {
       const ims: { im: PdfImage; src: string }[] = [];
       for (const im of it.ims) {
@@ -1071,7 +1672,7 @@ export async function renderContainer(c: Container, bounds: Box, ctx: LayoutCtx,
       const node = paragraph(attrs, content);
       blocks.push(node);
       prevBlock = node;
-      prevBottom = y0 + (y1 - y0) * scale;
+      prevBottom = Math.max(y0, prevBottom) + (y1 - y0) * scale;
       continue;
     }
     if (it.kind === 'row') {
@@ -1079,7 +1680,7 @@ export async function renderContainer(c: Container, bounds: Box, ctx: LayoutCtx,
       const node = await renderSideBySide(it.g, L, R, ctx, underlined);
       blocks.push(node);
       prevBlock = node;
-      prevBottom = Math.max(...it.g.map((o) => o.y1));
+      prevBottom = Math.max(it.top, prevBottom) + Math.max(...it.g.map((o) => o.y1)) - it.top;
       continue;
     }
     if (it.kind === 'table') {
@@ -1087,7 +1688,7 @@ export async function renderContainer(c: Container, bounds: Box, ctx: LayoutCtx,
       const node = await renderTable(it.t, L, R, ctx, underlined);
       blocks.push(node);
       prevBlock = node;
-      prevBottom = it.t.y1;
+      prevBottom = Math.max(it.t.y0, prevBottom) + (it.t.y1 - it.t.y0);
       continue;
     }
     // 상자
@@ -1096,7 +1697,7 @@ export async function renderContainer(c: Container, bounds: Box, ctx: LayoutCtx,
     const node = await renderBox(b, L, R, ctx, underlined);
     blocks.push(node);
     prevBlock = node;
-    prevBottom = b.y1;
+    prevBottom = Math.max(b.y0, prevBottom) + (b.y1 - b.y0);
   }
   flushPara();
   return { blocks, endY: prevBottom };
@@ -1107,17 +1708,21 @@ async function renderBox(b: BoxModel, L: number, R: number, ctx: LayoutCtx, unde
   const inner = b.inner;
   const lines2 = buildLines(inner.glyphs, underlined);
   const pad = lines2.length ? Math.max(1, Math.min(14, Math.min(...lines2.map((l) => l.x0)) - b.x0)) : 4;
-  const content = await renderContainer(inner, { x0: b.x0 + pad, y0: b.y0, x1: b.x1 - pad, y1: b.y1 }, ctx, underlined, b.y0 + 1.4);
-  const after = Math.max(0, b.y1 - 1.4 - content.endY);
-  const cblocks = content.blocks.length ? content.blocks : [paragraph()];
-  const lastB = cblocks[cblocks.length - 1];
-  if (after >= 0.8 && lastB.type === 'paragraph') (lastB.attrs ||= {}).spaceAfter = round(Math.min(after, 400), 1);
+  const content = await renderContainer(inner, cellInner(b.x0, Math.round((b.x1 - b.x0) * PT2PX), Math.round(pad * PT2PX), b.y0, b.y1), ctx, underlined, b.y0 + 1.4);
+  const cblocks = content.blocks.length ? content.blocks : [emptyPara(b.y1 - b.y0)];
   const attrs: Record<string, any> = { colspan: 1, rowspan: 1, colwidth: [Math.round((b.x1 - b.x0) * PT2PX)], borderStyle: 'l r t b', verticalAlign: 'top' };
   if (inner.bg) attrs.backgroundColor = inner.bg;
+  if (inner.bgImage) {
+    const im = inner.bgImage;
+    const src = await ctx.imageSrc(im);
+    if (src) attrs.bgImages = [{ src, x: round(im.x0 - b.x0, 1), y: round(im.y0 - b.y0, 1), w: round(im.x1 - im.x0, 1), h: round(im.y1 - im.y0, 1) }];
+  }
   const tAttrs: Record<string, any> = { cellPadding: Math.round(pad * PT2PX) };
   const bc = (b.x0 + b.x1) / 2;
   if (Math.abs(bc - (L + R) / 2) < 6 && b.x1 - b.x0 < W - 10) tAttrs.align = 'center';
-  return { type: 'table', attrs: tAttrs, content: [{ type: 'tableRow', content: [{ type: 'tableCell', attrs, content: cblocks }] }] };
+  else if (Math.abs(b.x0 - L) > 1) tAttrs.indent = round(b.x0 - L, 1);
+  // 상자 높이는 PDF 그대로 (내용이 더 크면 늘어난다)
+  return { type: 'table', attrs: tAttrs, content: [{ type: 'tableRow', attrs: { height: Math.round((b.y1 - b.y0) * PT2PX) }, content: [{ type: 'tableCell', attrs, content: cblocks }] }] };
 }
 
 /** 가로로 나란한 표/상자들 → 테두리 없는 한 행 표의 칸들 */
@@ -1130,7 +1735,10 @@ async function renderSideBySide(group: (TableModel | BoxModel)[], L: number, R: 
     // 칸 너비: 다음 것의 시작까지 (사이 간격 포함)
     const right = k + 1 < g.length ? g[k + 1].x0 : ch.x1;
     const node = ch.type === 'table' ? await renderTable(ch, ch.x0, ch.x1, ctx, underlined) : await renderBox(ch, ch.x0, ch.x1, ctx, underlined);
-    if (node.attrs) delete node.attrs.align;
+    if (node.attrs) {
+      delete node.attrs.align;
+      delete node.attrs.indent;
+    }
     // 칸 안의 위쪽 어긋남은 빈 줄로
     const top = Math.min(...g.map((o) => o.y0));
     const content: JNode[] = [];
@@ -1142,7 +1750,9 @@ async function renderSideBySide(group: (TableModel | BoxModel)[], L: number, R: 
   const W = R - L;
   const gx1 = g[g.length - 1].x1;
   if (Math.abs((x0 + gx1) / 2 - (L + R) / 2) < 8 && gx1 - x0 < W - 10) tAttrs.align = 'center';
-  return { type: 'table', attrs: tAttrs, content: [{ type: 'tableRow', content: cells }] };
+  else if (Math.abs(x0 - L) > 1) tAttrs.indent = round(x0 - L, 1);
+  const h = Math.max(...g.map((o) => o.y1)) - Math.min(...g.map((o) => o.y0));
+  return { type: 'table', attrs: tAttrs, content: [{ type: 'tableRow', attrs: { height: Math.round(h * PT2PX) }, content: cells }] };
 }
 
 function lineAlign(l: TLine, L: number, R: number, narrow = false): 'center' | 'right' | null {
@@ -1198,24 +1808,33 @@ async function renderTable(t: TableModel, L: number, R: number, ctx: LayoutCtx, 
   const rows: JNode[][] = Array.from({ length: nR }, () => []);
   const nodeOf = new Map<CellModel, JNode>();
   const sorted = t.cells.slice().sort((a, b) => a.row - b.row || a.col - b.col);
+  const padPx = Math.round(pad * PT2PX);
   for (const c of sorted) {
-    const content = await renderContainer(c, { x0: c.x0 + pad, y0: c.y0, x1: c.x1 - pad, y1: c.y1 }, ctx, underlined, c.y0 + PADV);
-    const blocks = content.blocks.length ? content.blocks : [paragraph()];
+    // 편집 화면의 칸 왼쪽 끝 = 표 왼쪽 + 앞 열들의 (반올림한) 너비
+    const left = t.x0 + colW.slice(0, c.col).reduce((a, v) => a + v, 0) / PT2PX;
+    const wPx = colW.slice(c.col, c.col + c.cs).reduce((a, v) => a + v, 0);
+    const content = await renderContainer(c, cellInner(left, wPx, padPx, c.y0, c.y1), ctx, underlined, c.y0 + PADV);
+    // 빈 칸: 기본 빈 문단(10pt 의 160%)이 낮은 행을 늘리지 않도록 줄 간격을 칸 높이에 맞춘다
+    const blocks = content.blocks.length ? content.blocks : [emptyPara(c.y1 - c.y0)];
     const ls = cellLines.get(c)!;
     const attrs: Record<string, any> = { colspan: c.cs, rowspan: c.rs, colwidth: colW.slice(c.col, c.col + c.cs) };
     if (c.bg) attrs.backgroundColor = c.bg;
+    if (c.overlays?.length) {
+      const list: { src: string; x: number; y: number; w: number; h: number }[] = [];
+      for (const im of c.overlays) {
+        const src = await ctx.imageSrc(im);
+        if (src) list.push({ src, x: round(im.x0 - left, 1), y: round(im.y0 - c.y0, 1), w: round(im.x1 - im.x0, 1), h: round(im.y1 - im.y0, 1) });
+      }
+      if (list.length) attrs.bgImages = list;
+    }
     if (ls.length || c.children.length || c.images.length) {
       const first = blocks[0];
       const topGap = (first.attrs?.spaceBefore as number) || 0;
       const botGap = Math.max(0, c.y1 - PADV - content.endY);
-      if (Math.abs(topGap - botGap) < Math.max(2, (topGap + botGap) * 0.2)) {
+      if (!c.layout && Math.abs(topGap - botGap) < Math.max(2, (topGap + botGap) * 0.2)) {
         attrs.verticalAlign = 'middle';
         if (first.attrs) delete first.attrs.spaceBefore;
-      } else {
-        attrs.verticalAlign = 'top';
-        const lastB = blocks[blocks.length - 1];
-        if (botGap >= 0.8 && lastB.type === 'paragraph') (lastB.attrs ||= {}).spaceAfter = round(Math.min(botGap, 400), 1);
-      }
+      } else attrs.verticalAlign = 'top';
     }
     // 테두리
     const sides: Partial<Record<'l' | 'r' | 't' | 'b', BorderSide>> = {};
@@ -1235,6 +1854,9 @@ async function renderTable(t: TableModel, L: number, R: number, ctx: LayoutCtx, 
   // 셀이 하나도 시작하지 않는 행은 없애고 rowspan을 줄인다
   const empty: number[] = [];
   for (let r = 0; r < nR; r++) if (!rows[r].length) empty.push(r);
+  // 행 높이 (pt → px): 없어지는 행의 높이는 앞 행에 더한다
+  const rowH = t.ys.slice(1).map((y, i) => y - t.ys[i]);
+  for (let r = nR - 1; r > 0; r--) if (!rows[r].length) rowH[r - 1] += rowH[r];
   if (empty.length) {
     for (const c of sorted) {
       const lost = empty.filter((r) => r > c.row && r < c.row + c.rs).length;
@@ -1244,7 +1866,25 @@ async function renderTable(t: TableModel, L: number, R: number, ctx: LayoutCtx, 
   const tAttrs: Record<string, any> = { cellPadding: Math.round(pad * PT2PX) };
   const tc = (t.x0 + t.x1) / 2;
   if (Math.abs(tc - (L + R) / 2) < 6 && t.x1 - t.x0 < R - L - 10) tAttrs.align = 'center';
-  return { type: 'table', attrs: tAttrs, content: rows.filter((r) => r.length).map((r) => ({ type: 'tableRow', content: r })) };
+  else if (Math.abs(t.x0 - L) > 1) tAttrs.indent = round(t.x0 - L, 1);
+  return {
+    type: 'table',
+    attrs: tAttrs,
+    content: rows.map((r, i) => ({ r, h: rowH[i] })).filter((x) => x.r.length).map((x) => ({ type: 'tableRow', attrs: { height: Math.round(x.h * PT2PX) }, content: x.r })),
+  };
+}
+
+/** 높이 h(pt)인 칸에 넣는 빈 문단 */
+function emptyPara(h: number): JNode {
+  return paragraph({ lineHeight: `${round(Math.max(1, Math.min(16, h - 2 * CELL_PADV - 0.5)), 1)}pt` }, []);
+}
+
+/**
+ * 편집 화면에서 칸의 글자가 놓이는 범위 (pt): 열 너비·안쪽 여백은 px 로 반올림되고
+ * 칸 테두리(1px, 겹친 선이라 칸마다 반씩)가 빠진다. 이 범위를 넘는 줄은 다시 줄바꿈되므로 정확해야 한다.
+ */
+function cellInner(left: number, widthPx: number, padPx: number, y0: number, y1: number): Box {
+  return { x0: left + (padPx + 0.5) / PT2PX, y0, x1: left + (widthPx - padPx - 0.5) / PT2PX, y1 };
 }
 
 /** 페이지에서 쓰는 대표 줄 간격 비율(기준선 간격 / 글자 크기) */

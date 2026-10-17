@@ -7,6 +7,8 @@ import { platform } from '../platform';
 import { bytesToDataUrl, mimeFromExt, splitExt } from '../formats/common';
 import { sniffImageSize } from '../formats/imageUtil';
 import { computeGeom } from '../print';
+import * as review from './review';
+import * as collab from '../collab/session';
 
 export interface Command {
   label: string;
@@ -168,6 +170,7 @@ function insertDateTime(fmt: 'date' | 'datetime' | 'time' | 'korean') {
 export const commands: Record<string, Command> = {
   // ----- 파일 -----
   'file.new': { label: '새 문서', icon: 'FilePlus', shortcut: 'Alt+N', keys: ['Alt+N'], run: () => app.newDoc() },
+  'file.template': { label: '서식 문서로 새로 만들기...', icon: 'LayoutTemplate', shortcut: 'Ctrl+Alt+N', keys: ['Ctrl+Alt+N'], run: () => app.openDialog('template') },
   'file.open': { label: '불러오기...', icon: 'FolderOpen', shortcut: 'Alt+O', keys: ['Alt+O', 'Ctrl+O'], run: () => app.openFiles() },
   'file.save': { label: '저장하기', icon: 'Save', shortcut: 'Alt+S', keys: ['Alt+S', 'Ctrl+S'], run: () => app.save(), enabled: hasDoc },
   'file.saveAs': { label: '다른 이름으로 저장하기...', icon: 'SaveAll', shortcut: 'Alt+V', keys: ['Alt+V', 'Ctrl+Shift+S'], run: () => app.saveAs(), enabled: hasDoc },
@@ -185,8 +188,8 @@ export const commands: Record<string, Command> = {
   'file.exit': { label: '끝', icon: 'LogOut', shortcut: 'Alt+X', keys: ['Alt+X'], run: () => app.requestQuit() },
 
   // ----- 편집 -----
-  'edit.undo': { label: '되돌리기', icon: 'Undo2', shortcut: 'Ctrl+Z', run: () => chain().undo().run(), enabled: () => !!ed()?.can().undo() },
-  'edit.redo': { label: '다시 실행', icon: 'Redo2', shortcut: 'Ctrl+Shift+Z', run: () => chain().redo().run(), enabled: () => !!ed()?.can().redo() },
+  'edit.undo': { label: '되돌리기', icon: 'Undo2', shortcut: 'Ctrl+Z', run: () => collab.collabUndo() || chain().undo().run(), enabled: () => collab.isCollabTab(app.active) || !!ed()?.can().undo() },
+  'edit.redo': { label: '다시 실행', icon: 'Redo2', shortcut: 'Ctrl+Shift+Z', run: () => collab.collabUndo(true) || chain().redo().run(), enabled: () => collab.isCollabTab(app.active) || !!ed()?.can().redo() },
   'edit.cut': { label: '오려 두기', icon: 'Scissors', shortcut: 'Ctrl+X', run: () => (ed()?.commands.focus(), document.execCommand('cut')), enabled: hasDoc },
   'edit.copy': { label: '복사하기', icon: 'Copy', shortcut: 'Ctrl+C', run: () => (ed()?.commands.focus(), document.execCommand('copy')), enabled: hasDoc },
   'edit.paste': { label: '붙이기', icon: 'ClipboardPaste', shortcut: 'Ctrl+V', run: () => (ed()?.commands.focus(), platform.paste()), enabled: hasDoc },
@@ -220,6 +223,17 @@ export const commands: Record<string, Command> = {
     enabled: hasDoc,
   },
   'view.fullscreen': { label: '전체 화면', shortcut: 'F11', keys: ['F11'], run: () => platform.toggleFullscreen() },
+  'view.darkMode': {
+    label: '어두운 화면',
+    icon: 'Moon',
+    run: () => app.setTheme(app.effectiveTheme === 'dark' ? 'light' : 'dark'),
+    active: () => app.effectiveTheme === 'dark',
+  },
+  'view.darkPaper': {
+    label: '종이도 어둡게 (화면에서만)',
+    run: () => app.setTheme(app.effectiveTheme === 'dark' ? app.prefs.theme : 'dark', !app.prefs.darkPaper),
+    active: () => app.effectiveTheme === 'dark' && app.prefs.darkPaper,
+  },
 
   // ----- 입력 -----
   'insert.table': { label: '표...', icon: 'Table', shortcut: 'Ctrl+N,T', run: () => app.openDialog('table'), enabled: hasDoc },
@@ -249,6 +263,7 @@ export const commands: Record<string, Command> = {
   'insert.link': { label: '하이퍼링크...', icon: 'Link', shortcut: 'Ctrl+K,H', keys: ['Ctrl+K'], run: () => app.openDialog('link'), enabled: hasDoc },
   'insert.symbol': { label: '문자표...', icon: 'Omega', shortcut: 'Ctrl+F10', keys: ['Ctrl+F10'], run: () => app.openDialog('symbol'), enabled: hasDoc },
   'insert.footnote': { label: '각주', icon: 'Superscript', shortcut: 'Ctrl+N,N', run: () => app.openDialog('footnote', { pos: null, text: '' }), enabled: hasDoc },
+  'insert.math': { label: '수식...', icon: 'Sigma', shortcut: 'Ctrl+N,M', run: () => app.openDialog('math', { pos: null, latex: '', hwp: '' }), enabled: hasDoc },
   'insert.pageBreak': { label: '쪽 나누기', icon: 'SeparatorHorizontal', shortcut: 'Ctrl+Enter', run: () => chain().setPageBreak().run(), enabled: hasDoc },
   'insert.hr': { label: '가로줄', icon: 'Minus', run: () => chain().setHorizontalRule().run(), enabled: hasDoc },
   'insert.date': { label: '날짜 (yyyy-mm-dd)', icon: 'Calendar', run: () => insertDateTime('date'), enabled: hasDoc },
@@ -351,12 +366,101 @@ export const commands: Record<string, Command> = {
     enabled: inTable,
   },
 
+  // ----- 검토 -----
+  'review.track': {
+    label: '변경 내용 기록',
+    icon: 'PencilLine',
+    shortcut: 'Ctrl+Shift+E',
+    keys: ['Ctrl+Shift+E'],
+    run: () => review.setTracking(!review.trackingOn()),
+    active: () => review.trackingOn(),
+    enabled: hasDoc,
+  },
+  'review.panel': {
+    label: '검토 창 (메모·변경 내용)',
+    icon: 'MessageSquare',
+    run: () => app.set({ reviewOpen: !app.reviewOpen }),
+    active: () => app.reviewOpen,
+    enabled: hasDoc,
+  },
+  'review.addComment': {
+    label: '메모 넣기',
+    icon: 'MessageSquarePlus',
+    shortcut: 'Ctrl+Alt+C',
+    keys: ['Ctrl+Alt+C'],
+    run: () => app.set({ reviewOpen: true, reviewTab: 'comments', commentDraft: true }),
+    enabled: hasDoc,
+  },
+  'review.acceptSel': {
+    label: '이 변경 받아들이기',
+    icon: 'Check',
+    run: () => {
+      const n = review.resolve(true);
+      app.toast(n ? `변경 ${n}개를 받아들였습니다.` : '받아들일 변경이 없습니다.');
+    },
+    enabled: hasDoc,
+  },
+  'review.rejectSel': {
+    label: '이 변경 되돌리기',
+    icon: 'X',
+    run: () => {
+      const n = review.resolve(false);
+      app.toast(n ? `변경 ${n}개를 되돌렸습니다.` : '되돌릴 변경이 없습니다.');
+    },
+    enabled: hasDoc,
+  },
+  'review.acceptAll': {
+    label: '변경 내용 모두 받아들이기',
+    icon: 'CheckCheck',
+    run: () => {
+      const n = review.resolve(true, { all: true });
+      app.toast(n ? `변경 ${n}개를 모두 받아들였습니다.` : '받아들일 변경이 없습니다.');
+    },
+    enabled: hasDoc,
+  },
+  'review.rejectAll': {
+    label: '변경 내용 모두 되돌리기',
+    run: () => {
+      const n = review.resolve(false, { all: true });
+      app.toast(n ? `변경 ${n}개를 모두 되돌렸습니다.` : '되돌릴 변경이 없습니다.');
+    },
+    enabled: hasDoc,
+  },
+
   // ----- 도구 -----
-  'tools.spell': {
-    label: '맞춤법 검사 (영문)',
+  'tools.privacy': {
+    label: '개인정보 찾기·가림...',
+    icon: 'EyeOff',
+    run: () => app.openDialog('privacy'),
+    enabled: hasDoc,
+  },
+  'file.versions': {
+    label: '버전 기록',
+    icon: 'History',
+    shortcut: 'Ctrl+Alt+H',
+    keys: ['Ctrl+Alt+H'],
+    run: () => app.set({ versionsOpen: !app.versionsOpen }),
+    active: () => app.versionsOpen,
+    enabled: hasDoc,
+  },
+  'tools.collab': {
+    label: '실시간 공동 편집 (실험)...',
+    icon: 'Users',
+    run: () => app.openDialog('collab'),
+    enabled: () => collab.collabAvailable(),
+    active: () => !!collab.collabState(),
+  },
+  'tools.check': {
+    label: '맞춤법·공문서 검사',
     icon: 'SpellCheck',
     shortcut: 'F8',
     keys: ['F8'],
+    run: () => app.set({ checkOpen: !app.checkOpen }),
+    active: () => app.checkOpen,
+    enabled: hasDoc,
+  },
+  'tools.spell': {
+    label: '영문 맞춤법 밑줄',
     run: () => {
       app.prefs.spellcheck = !app.prefs.spellcheck;
       app.savePrefs();
@@ -372,6 +476,7 @@ export const commands: Record<string, Command> = {
   'tools.shortcuts': { label: '단축키 목록', icon: 'Keyboard', shortcut: 'Shift+F1', keys: ['Shift+F1'], run: () => app.openDialog('shortcuts') },
   'tools.mcp': { label: 'AI 앱 연결 (MCP)...', icon: 'Plug', run: () => app.openDialog('mcp') },
   'tools.about': { label: 'Kite 정보', icon: 'Info', run: () => app.openDialog('about') },
+  'tools.palette': { label: '명령 찾기', icon: 'Command', shortcut: 'Ctrl+Shift+P', keys: ['Ctrl+Shift+P'], run: () => app.set({ paletteOpen: true }) },
   'tools.overwrite': { label: '삽입/수정 모드 전환', shortcut: 'Insert', run: () => chain().toggleOverwrite().run(), enabled: hasDoc },
 };
 
@@ -394,7 +499,14 @@ export function runCommand(id: string) {
   if (!c) return;
   if (c.enabled && !c.enabled()) return;
   c.run();
+  // 명령 팔레트의 '최근 사용'
+  if (id !== 'tools.palette') {
+    app.prefs.recentCommands = [id, ...(app.prefs.recentCommands || []).filter((x) => x !== id)].slice(0, 12);
+    clearTimeout(recentSaveTimer);
+    recentSaveTimer = setTimeout(() => app.savePrefs(), 1500);
+  }
 }
+let recentSaveTimer: any = null;
 
 // ---------------- 전역 단축키 ----------------
 function keyName(e: KeyboardEvent): string {
@@ -418,7 +530,7 @@ for (const [id, c] of Object.entries(commands)) for (const k of c.keys || []) ke
 
 /** Ctrl+N 다음 글자로 이어지는 한글식 단축키 */
 const CHORDS: Record<string, Record<string, string>> = {
-  'Ctrl+N': { T: 'insert.table', I: 'insert.image', H: 'page.headerFooter', P: 'page.number', N: 'insert.footnote' },
+  'Ctrl+N': { T: 'insert.table', I: 'insert.image', H: 'page.headerFooter', P: 'page.number', N: 'insert.footnote', M: 'insert.math' },
   'Ctrl+Q': { I: 'file.info' },
   'Ctrl+G': { T: 'view.marks' },
 };

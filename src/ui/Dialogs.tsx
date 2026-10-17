@@ -18,12 +18,16 @@ import {
   ImageCropDialog,
 } from './dialogs/MiscDialogs';
 import { McpDialog } from './dialogs/McpDialog';
+import { PrivacyDialog } from './dialogs/PrivacyDialog';
+import { MathDialog } from './dialogs/MathDialog';
+import { CollabDialog } from './dialogs/CollabDialog';
+import { TemplateDialog } from './dialogs/TemplateDialog';
 
 export function Dialogs() {
   const app = useApp();
   const d = app.dialog;
   const close = () => app.closeDialog();
-  const needsDoc = d && !['prefs', 'shortcuts', 'about', 'mcp'].includes(d.type);
+  const needsDoc = d && !['prefs', 'shortcuts', 'about', 'mcp', 'collab', 'template'].includes(d.type);
   let el: JSX.Element | null = null;
   if (d && (!needsDoc || app.active)) {
     switch (d.type) {
@@ -80,6 +84,18 @@ export function Dialogs() {
         break;
       case 'mcp':
         el = <McpDialog onClose={close} />;
+        break;
+      case 'math':
+        el = <MathDialog onClose={close} pos={d.props?.pos ?? null} latex={d.props?.latex || ''} hwp={d.props?.hwp || ''} />;
+        break;
+      case 'template':
+        el = <TemplateDialog onClose={close} />;
+        break;
+      case 'collab':
+        el = <CollabDialog onClose={close} />;
+        break;
+      case 'privacy':
+        el = <PrivacyDialog onClose={close} />;
         break;
     }
   }

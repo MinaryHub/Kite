@@ -71,6 +71,23 @@ export function hfZones(s: DocSettings, g: PageGeom) {
   return { header: { top: hTop, height: hH }, footer: { top: fTop, height: fH } };
 }
 
+/** k 번째 쪽의 배경 그림 스타일 (PDF 에서 온 쪽 바탕 그림) — 없거나 이상하면 null */
+export function pageBackgroundStyle(s: DocSettings, k: number, dy = 0): Record<string, string> | null {
+  const b = s.pageBackgrounds?.[k];
+  if (!b || typeof b.src !== 'string' || !/^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+$/.test(b.src)) return null;
+  const n = (v: any) => (typeof v === 'number' && isFinite(v) ? v : null);
+  const x = n(b.x), y = n(b.y), w = n(b.w), h = n(b.h);
+  if (x == null || y == null || w == null || h == null || w <= 0 || h <= 0) return null;
+  const px = 96 / 72;
+  return {
+    backgroundImage: `url("${b.src}")`,
+    // dy: 이 요소가 쪽 위끝에서 떨어진 거리(px) — 쪽 경계 가리개에도 같은 배경을 이어 그린다
+    backgroundPosition: `${x * px}px ${y * px - dy}px`,
+    backgroundSize: `${w * px}px ${h * px}px`,
+    backgroundRepeat: 'no-repeat',
+  };
+}
+
 /** 한 쪽의 머리말/꼬리말/쪽 번호/각주 HTML */
 export function pageChromeHtml(tab: DocTab, g: PageGeom, k: number, pageCount: number): string {
   const s = tab.settings;
@@ -119,6 +136,8 @@ export function buildPrintPage(tab: DocTab, g: PageGeom, k: number, boxes: PageB
   page.className = 'print-page';
   page.style.width = `${g.wMm}mm`;
   page.style.height = `${g.hMm}mm`;
+  const bg = pageBackgroundStyle(tab.settings, k);
+  if (bg) Object.assign(page.style, bg);
   const body = document.createElement('div');
   body.className = 'print-body';
   Object.assign(body.style, { left: `${g.ml}px`, top: `${g.mt}px`, width: `${g.contentW}px`, height: `${g.contentH}px` });

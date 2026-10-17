@@ -87,6 +87,7 @@
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",
     "@types/turndown": "^5.0.6",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.1.2",
     "cfb": "^1.2.2",
     "dompurify": "^3.4.17",
@@ -107,5 +108,13 @@
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
     "word-extractor": "^1.0.4"
+  },
+  "dependencies": {
+    "katex": "^0.16.22",
+    "lib0": "^0.2.119",
+    "ws": "^8.22.0",
+    "y-prosemirror": "^1.3.7",
+    "y-protocols": "^1.0.6",
+    "yjs": "^13.6.27"
   }
 }

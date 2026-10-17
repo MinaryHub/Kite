@@ -117,6 +117,121 @@ export const MCP_TOOLS: McpToolDef[] = [
     },
     edits: true,
   },
+  {
+    name: 'get_outline',
+    title: '문서 개요',
+    description: '문서의 제목(장·절) 목록을 블록 번호와 함께 돌려준다. 긴 문서에서 읽을 부분을 고를 때 먼저 쓴다. 표·그림 개수와 메모·변경 제안 수도 함께 알려 준다.',
+    inputSchema: { type: 'object', properties: { document_id: docId }, additionalProperties: false },
+    edits: false,
+  },
+  {
+    name: 'apply_style',
+    title: '문단 모양 적용',
+    description: 'from_block 부터 to_block 까지(포함)의 문단에 스타일을 적용한다. style: p(바탕글) | body(본문, 들여쓰기) | h1–h6(제목 1–6) | quote(인용) | code(코드).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        document_id: docId,
+        from_block: { type: 'integer', minimum: 0 },
+        to_block: { type: 'integer', minimum: 0 },
+        style: { type: 'string', enum: ['p', 'body', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'quote', 'code'] },
+      },
+      required: ['from_block', 'to_block', 'style'],
+      additionalProperties: false,
+    },
+    edits: true,
+  },
+  {
+    name: 'insert_table',
+    title: '표 넣기',
+    description: '표를 넣는다. rows 는 행 배열이며 각 행은 칸 글자 배열이다. header 가 true 면 첫 행을 머리글로 쓴다 (기본 true). 위치는 insert_content 와 같다 (기본 커서 뒤 문단).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        document_id: docId,
+        rows: { type: 'array', minItems: 1, maxItems: 500, items: { type: 'array', minItems: 1, maxItems: 50, items: { type: 'string' } } },
+        header: { type: 'boolean' },
+        position: { type: 'string', enum: ['cursor', 'start', 'end', 'after_block', 'before_block'] },
+        block: { type: 'integer', minimum: 0 },
+      },
+      required: ['rows'],
+      additionalProperties: false,
+    },
+    edits: true,
+  },
+  {
+    name: 'list_comments',
+    title: '메모 목록',
+    description: '문서의 메모를 돌려준다 (id, 작성자, 내용, 답글, 해결 여부, 메모가 달린 본문 글자와 블록 번호).',
+    inputSchema: {
+      type: 'object',
+      properties: { document_id: docId, include_resolved: { type: 'boolean', description: '해결한 메모도 포함 (기본 false)' } },
+      additionalProperties: false,
+    },
+    edits: false,
+  },
+  {
+    name: 'add_comment',
+    title: '메모 달기',
+    description:
+      '본문에 메모를 단다. quote 로 메모를 달 글자를 정한다 (문단 안에서 찾는 첫 번째, 또는 occurrence 번째). quote 대신 block 을 주면 그 블록 전체에 단다. 작성자는 AI 앱 이름으로 남는다.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        document_id: docId,
+        text: { type: 'string', minLength: 1, description: '메모 내용' },
+        quote: { type: 'string', description: '메모를 달 본문 글자 (한 문단 안)' },
+        occurrence: { type: 'integer', minimum: 1, description: 'quote 가 여러 번 나올 때 몇 번째인지 (기본 1)' },
+        block: { type: 'integer', minimum: 0, description: 'quote 대신 블록 전체에 달 때' },
+      },
+      required: ['text'],
+      additionalProperties: false,
+    },
+    edits: true,
+  },
+  {
+    name: 'reply_comment',
+    title: '메모에 답글',
+    description: '메모에 답글을 단다 (comment_id 는 list_comments 결과). resolve 를 true 로 주면 답글을 달고 해결로 표시한다.',
+    inputSchema: {
+      type: 'object',
+      properties: { document_id: docId, comment_id: { type: 'string' }, text: { type: 'string' }, resolve: { type: 'boolean' } },
+      required: ['comment_id'],
+      additionalProperties: false,
+    },
+    edits: true,
+  },
+  {
+    name: 'list_changes',
+    title: '변경 제안 목록',
+    description: '문서의 변경 제안(변경 내용 추적의 넣음/지움)을 돌려준다. 각 항목은 change_ids, 작성자, 종류, 글자, 블록 번호를 가진다. 변경 내용 기록이 켜져 있는지도 알려 준다.',
+    inputSchema: { type: 'object', properties: { document_id: docId }, additionalProperties: false },
+    edits: false,
+  },
+  {
+    name: 'resolve_changes',
+    title: '변경 받아들이기/되돌리기',
+    description: '변경 제안을 받아들이거나(accept) 되돌린다(reject). change_ids 를 주면 그 변경만, all 이 true 면 전체를 처리한다.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        document_id: docId,
+        action: { type: 'string', enum: ['accept', 'reject'] },
+        change_ids: { type: 'array', items: { type: 'string' }, maxItems: 1000 },
+        all: { type: 'boolean' },
+      },
+      required: ['action'],
+      additionalProperties: false,
+    },
+    edits: true,
+  },
+  {
+    name: 'save_document',
+    title: '문서 저장',
+    description: '문서를 원래 파일에 저장한다. 사용자에게 항상 확인을 받는다. 아직 파일로 저장한 적이 없는 새 문서는 저장할 수 없다 (사용자가 직접 위치를 정해야 한다).',
+    inputSchema: { type: 'object', properties: { document_id: docId }, additionalProperties: false },
+    edits: true,
+  },
 ];
 
 export const MCP_TOOL_NAMES = new Set(MCP_TOOLS.map((t) => t.name));

@@ -63,6 +63,9 @@ export function showContextMenu(x: number, y: number, tab: DocTab) {
       '-',
     );
   }
+  items.push('review.addComment');
+  if (editor.isActive('insertion') || editor.isActive('deletion')) items.push('review.acceptSel', 'review.rejectSel');
+  items.push('-');
   items.push('format.char', 'format.para', 'format.style', '-');
   if (editor.isActive('table')) {
     items.push(

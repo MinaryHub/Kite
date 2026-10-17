@@ -64,11 +64,23 @@ const api = {
   listPrivateFonts: (): Promise<string[][]> => ipcRenderer.invoke('fonts:private-list'),
   readPrivateFont: (name: string): Promise<{ names: string[]; data: Uint8Array } | null> => ipcRenderer.invoke('fonts:private-read', name),
   convertDoc: (data: Uint8Array): Promise<any> => ipcRenderer.invoke('doc:convert', data),
-  aiKeyStatus: (): Promise<Record<'claude' | 'openai' | 'gemini', 'saved' | 'env' | 'none'>> => ipcRenderer.invoke('ai:key-status'),
+  aiKeyStatus: (): Promise<Record<'claude' | 'openai' | 'gemini' | 'ollama', 'saved' | 'env' | 'none'>> => ipcRenderer.invoke('ai:key-status'),
   aiSetKey: (p: string, key: string | null) => ipcRenderer.invoke('ai:set-key', p, key),
   aiModels: (p: string): Promise<{ ok: boolean; models?: { id: string; label: string }[]; error?: string }> => ipcRenderer.invoke('ai:models', p),
   aiChat: (req: any) => ipcRenderer.invoke('ai:chat', req),
   aiAbort: (id: string) => ipcRenderer.invoke('ai:abort', id),
+  // 실시간 공동 편집 (실험)
+  collabHost: (port?: number): Promise<{ port: number; code: string; addresses: string[] }> => ipcRenderer.invoke('collab:host', port),
+  collabJoin: (address: string, code: string): Promise<boolean> => ipcRenderer.invoke('collab:join', address, code),
+  collabStop: () => ipcRenderer.invoke('collab:stop'),
+  collabSend: (data: Uint8Array) => ipcRenderer.send('collab:send', data),
+  onCollabEvent: (cb: (ev: any) => void) => {
+    const h = (_e: unknown, ev: any) => cb(ev);
+    ipcRenderer.on('collab:event', h);
+    return () => {
+      ipcRenderer.removeListener('collab:event', h);
+    };
+  },
   onAiEvent: (cb: (ev: any) => void) => {
     const h = (_e: unknown, ev: any) => cb(ev);
     ipcRenderer.on('ai:event', h);

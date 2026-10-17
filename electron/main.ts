@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { initMcpHost, isMcpBridge, runMcpBridge } from './mcp';
+import { setupCollab } from './collab';
 import { listPrivateFonts, readPrivateFont } from './fonts';
 
 /** AI 앱이 실행한 MCP 다리(Kite.exe --mcp): 창 없이 표준 입출력으로만 동작한다 */
@@ -275,6 +276,7 @@ app.whenReady().then(() => {
   sweepStaleTemp();
   createWindow();
   initMcpHost(() => mainWindow);
+  setupCollab();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -681,7 +683,7 @@ ipcMain.handle('ai:models', async (_e, p: Provider) => {
     return { ok: false, error: String(e?.message || e) };
   }
 });
-const PROVIDERS = new Set(['claude', 'openai', 'gemini']);
+const PROVIDERS = new Set(['claude', 'openai', 'gemini', 'ollama']);
 const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 const MAX_CHAT_CHARS = 2 * 1024 * 1024;
 /** 렌더러에서 온 요청을 검사해 정리한 사본을 돌려준다 */

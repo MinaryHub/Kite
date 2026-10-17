@@ -1,3 +1,4 @@
+import { hwpToLatex } from '../../math/hwpEq';
 import * as CFB from 'cfb';
 import { Inflate } from 'pako';
 import type { LoadedDoc } from '../../types';
@@ -537,8 +538,7 @@ class HwpConverter {
       case 'eqed': {
         const eq = ctrl.children.find((c) => c.tag === T.EQEDIT);
         const script = eq ? wstr(eq, 4).s : '';
-        const t = textNode(script ? `[수식: ${script}]` : '[수식]', [...charMarks(this.charPr(shapeId)), { type: 'italic' }]);
-        if (t) inline.push(t);
+        if (script.trim()) inline.push({ type: 'math', attrs: { latex: hwpToLatex(script), hwp: script }, marks: charMarks(this.charPr(shapeId)) });
         return [];
       }
       case 'atno': {

@@ -9,9 +9,11 @@ import { htmlToJson } from '../formats/html';
 import { writeMarkdown } from '../formats/markdown';
 import { platform } from '../platform';
 
-/** AI 도우미: Claude / GPT / Gemini 채팅 패널 */
+/** AI 도우미: Claude / GPT / Gemini / Ollama(로컬 모델) 채팅 패널 */
 
-type Provider = 'claude' | 'openai' | 'gemini';
+type Provider = 'claude' | 'openai' | 'gemini' | 'ollama';
+/** 키가 필요한데 없는지 (Ollama 는 키 대신 서버 주소, 기본값이 있어 늘 쓸 수 있다) */
+const noKey = (keys: Record<string, string> | null, p: Provider) => !!keys && p !== 'ollama' && keys[p] === 'none';
 type KeyState = Record<Provider, 'saved' | 'env' | 'none'>;
 
 interface Msg {
@@ -33,6 +35,7 @@ const PROVIDERS: { id: Provider; label: string; defaultModel: string }[] = [
   { id: 'claude', label: 'Claude', defaultModel: 'claude-opus-5-5' },
   { id: 'openai', label: 'GPT', defaultModel: 'gpt-5.5' },
   { id: 'gemini', label: 'Gemini', defaultModel: 'gemini-flash-latest' },
+  { id: 'ollama', label: 'Ollama', defaultModel: 'qwen3' },
 ];
 
 const SYSTEM = `당신은 한국어 워드프로세서 "Kite"에 내장된 문서 작성 도우미입니다.
@@ -86,11 +89,12 @@ function getContext(mode: 'doc' | 'selection' | 'none'): { text: string; label: 
 export function AiPanel() {
   const appState = useApp();
   const [provider, setProvider] = useState<Provider>(() => (lsGet('provider', 'claude') as Provider) || 'claude');
-  const [models, setModels] = useState<Record<Provider, { id: string; label: string }[]>>({ claude: [], openai: [], gemini: [] });
+  const [models, setModels] = useState<Record<Provider, { id: string; label: string }[]>>({ claude: [], openai: [], gemini: [], ollama: [] });
   const [model, setModel] = useState<Record<Provider, string>>(() => ({
     claude: lsGet('model:claude', 'claude-opus-5-5'),
     openai: lsGet('model:openai', 'gpt-5.5'),
     gemini: lsGet('model:gemini', 'gemini-flash-latest'),
+    ollama: lsGet('model:ollama', 'qwen3'),
   }));
   const [keys, setKeys] = useState<KeyState | null>(null);
   const [ctxMode, setCtxMode] = useState<'doc' | 'selection' | 'none'>(() => lsGet('ctx', 'selection') as any);
@@ -135,7 +139,7 @@ export function AiPanel() {
   // 모델 목록 (GPT/Gemini는 API에서 가져옴)
   useEffect(() => {
     if (!api || !keys || models[provider].length) return;
-    if (keys[provider] === 'none') return;
+    if (noKey(keys, provider)) return;
     setModelError(null);
     api.aiModels(provider).then((r) => {
       if (r.ok && r.models) {
@@ -167,7 +171,7 @@ export function AiPanel() {
       return;
     }
     if (busyId || !text.trim()) return;
-    if (keys && keys[provider] === 'none') {
+    if (noKey(keys, provider)) {
       setShowKeys(true);
       return;
     }
@@ -261,7 +265,7 @@ export function AiPanel() {
               }}
             >
               {p.label}
-              {keys && keys[p.id] === 'none' && <span className="ai-nokey" title="API 키 없음">!</span>}
+              {noKey(keys, p.id) && <span className="ai-nokey" title="API 키 없음">!</span>}
             </button>
           ))}
         </span>
@@ -403,7 +407,7 @@ ${href.slice(0, 500)}
           onClose={() => setShowKeys(false)}
           onSaved={(k) => {
             setKeys(k);
-            setModels({ claude: [], openai: [], gemini: [] });
+            setModels({ claude: [], openai: [], gemini: [], ollama: [] });
           }}
         />
       )}
@@ -412,14 +416,19 @@ ${href.slice(0, 500)}
 }
 
 function AiKeysDialog({ keys, onClose, onSaved }: { keys: KeyState | null; onClose: () => void; onSaved: (k: KeyState) => void }) {
-  const [vals, setVals] = useState<Record<Provider, string>>({ claude: '', openai: '', gemini: '' });
+  const [vals, setVals] = useState<Record<Provider, string>>({ claude: '', openai: '', gemini: '', ollama: '' });
   const status = (p: Provider) => (keys?.[p] === 'saved' ? '저장됨' : keys?.[p] === 'env' ? '환경 변수 사용 중' : '없음');
   const save = async () => {
     if (!api) return;
     let k: KeyState | null = keys;
-    for (const p of ['claude', 'openai', 'gemini'] as Provider[]) if (vals[p].trim()) k = await api.aiSetKey(p, vals[p].trim());
+    try {
+      for (const p of ['claude', 'openai', 'gemini', 'ollama'] as Provider[]) if (vals[p].trim()) k = await api.aiSetKey(p, vals[p].trim());
+    } catch (e: any) {
+      app.toast(String(e?.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), 'error', 6000);
+      return;
+    }
     if (k) onSaved(k);
-    app.toast('API 키를 저장했습니다.');
+    app.toast('설정을 저장했습니다.');
     onClose();
   };
   const remove = async (p: Provider) => {
@@ -445,16 +454,28 @@ function AiKeysDialog({ keys, onClose, onSaved }: { keys: KeyState | null; onClo
     </>
   );
   return (
-    <Modal title="AI API 키" onClose={onClose} width={520} onEnter={save} footer={<><button className="btn primary" onClick={save}>저장</button><button className="btn" onClick={onClose}>닫기</button></>}>
+    <Modal title="AI 연결 설정" onClose={onClose} width={520} onEnter={save} footer={<><button className="btn primary" onClick={save}>저장</button><button className="btn" onClick={onClose}>닫기</button></>}>
       <div className="form-grid" style={{ alignItems: 'start' }}>
         {row('claude', 'Claude', 'console.anthropic.com', 'sk-ant-...')}
         {row('openai', 'OpenAI (GPT)', 'platform.openai.com', 'sk-...')}
         {row('gemini', 'Gemini', 'aistudio.google.com', 'AIza...')}
+        <label>Ollama 주소</label>
+        <div>
+          <div className="row">
+            <input style={{ flex: 1 }} placeholder="http://localhost:11434 (기본)" value={vals.ollama} onChange={(e) => setVals({ ...vals, ollama: e.target.value })} autoComplete="off" spellCheck={false} />
+            {keys?.ollama === 'saved' && (
+              <button className="btn small" onClick={() => remove('ollama')}>
+                기본값으로
+              </button>
+            )}
+          </div>
+          <div className="unit">{keys?.ollama === 'saved' ? '직접 정한 주소 사용 중' : keys?.ollama === 'env' ? 'OLLAMA_HOST 환경 변수 사용 중' : '기본 주소 사용 중'} · 키가 필요 없는 로컬 모델 (ollama.com)</div>
+        </div>
       </div>
       <p className="unit" style={{ marginTop: 12, lineHeight: 1.6 }}>
-        키는 이 컴퓨터에만 Windows 보안 저장소로 암호화해 보관하며, 각 회사의 API로만 전송됩니다. 비워 두면 기존 키를 그대로 둡니다.
+        키는 이 컴퓨터에만 운영체제 보안 저장소로 암호화해 보관하며, 각 회사의 API로만 전송됩니다. 비워 두면 기존 값을 그대로 둡니다.
         <br />
-        AI에 보낸 문서 내용은 선택한 회사(Anthropic·OpenAI·Google)로 전송되니, 민감한 문서는 주의하세요.
+        AI에 보낸 문서 내용은 선택한 회사(Anthropic·OpenAI·Google)로 전송되니, 민감한 문서는 주의하세요. Ollama 는 문서가 이 컴퓨터(또는 지정한 서버) 밖으로 나가지 않습니다.
       </p>
     </Modal>
   );

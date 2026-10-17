@@ -135,6 +135,10 @@ class DocxReader {
   private fieldIsPage: 0 | 1 | 2 = 0;
   private headerMode = false;
   listCounters = new Map<string, number>();
+  /** 지금 읽는 변경 내용 (w:ins / w:del 안) */
+  private review: JMark[] = [];
+  /** 지금 열려 있는 메모 범위 */
+  private activeComments = new Set<string>();
 
   constructor(private zip: JSZip) {}
 
@@ -215,6 +219,26 @@ class DocxReader {
         }
         this.numbering.set(attr(n, 'numId') || '', { abs: attr(kid(n, 'abstractNumId'), 'val') || '', overrides });
       }
+    }
+    // 메모
+    const commentsXml = await this.text('word/comments.xml');
+    if (commentsXml) {
+      const store: NonNullable<typeof this.settings.comments> = {};
+      for (const c of descendants(parseXml(commentsXml), 'comment')) {
+        const id = attr(c, 'id');
+        if (id == null) continue;
+        const text = descendants(c, 'p')
+          .map((p) =>
+            descendants(p, 't')
+              .map((t) => t.textContent || '')
+              .join(''),
+          )
+          .join('\n')
+          .trim();
+        const time = Date.parse(attr(c, 'date') || '') || 0;
+        store['w' + id] = { author: attr(c, 'author') || '', time, text, replies: [] };
+      }
+      if (Object.keys(store).length) this.settings.comments = store;
     }
     for (const [file, map] of [
       ['word/footnotes.xml', this.footnotes],
@@ -621,6 +645,26 @@ class DocxReader {
           break;
         }
         case 'ins':
+        case 'del':
+        case 'moveTo':
+        case 'moveFrom': {
+          // 변경 내용: 넣음/지움 표시를 단 채로 읽는다
+          const author = attr(el, 'author') || '';
+          const time = Date.parse(attr(el, 'date') || '') || 0;
+          const type = name === 'ins' || name === 'moveTo' ? 'insertion' : 'deletion';
+          this.review.push({ type, attrs: { id: `w${type[0]}${attr(el, 'id') || Math.random().toString(36).slice(2, 7)}`, author, time } });
+          this.collectInline(kids(el), baseR, link, out, after);
+          this.review.pop();
+          break;
+        }
+        case 'commentRangeStart': {
+          const id = 'w' + (attr(el, 'id') || '');
+          if (this.settings.comments?.[id]) this.activeComments.add(id);
+          break;
+        }
+        case 'commentRangeEnd':
+          this.activeComments.delete('w' + (attr(el, 'id') || ''));
+          break;
         case 'smartTag':
         case 'customXml':
         case 'dir':
@@ -653,11 +697,17 @@ class DocxReader {
     if (rStyle) for (const s of this.styleChain(rStyle)) this.applyR(r, s.rPr);
     this.applyR(r, rPr);
     if (r.hidden) return;
-    const marks = () => this.marksFrom(r, this.fieldLink || link);
+    const marks = () => {
+      const m = this.marksFrom(r, this.fieldLink || link);
+      if (this.review.length) m.push(this.review[this.review.length - 1]);
+      for (const id of this.activeComments) m.push({ type: 'comment', attrs: { id } });
+      return m;
+    };
     for (const c of kids(rEl)) {
       const name = localName(c);
       if (this.fieldStage === 'instr' && name !== 'instrText' && name !== 'fldChar') continue;
       switch (name) {
+        case 'delText':
         case 't': {
           if (this.fieldIsPage === 2) break;
           const n = textNode(c.textContent || '', marks());

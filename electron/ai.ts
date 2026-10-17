@@ -6,11 +6,12 @@ import OpenAI from 'openai';
 import { ApiError as GeminiApiError, GoogleGenAI } from '@google/genai';
 
 /**
- * AI 채팅 (Claude / GPT / Gemini). API 키는 메인 프로세스에만 두고
+ * AI 채팅 (Claude / GPT / Gemini / Ollama). API 키는 메인 프로세스에만 두고
  * 운영체제 보안 저장소(safeStorage)로 암호화해 보관한다.
+ * Ollama 는 이 컴퓨터(또는 사내 서버)에서 도는 로컬 모델이라 키 대신 서버 주소를 쓴다.
  */
 
-export type Provider = 'claude' | 'openai' | 'gemini';
+export type Provider = 'claude' | 'openai' | 'gemini' | 'ollama';
 
 export interface ChatMsg {
   role: 'user' | 'assistant';
@@ -35,6 +36,7 @@ const ENV_KEYS: Record<Provider, string[]> = {
   claude: ['ANTHROPIC_API_KEY'],
   openai: ['OPENAI_API_KEY'],
   gemini: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'],
+  ollama: ['OLLAMA_HOST'],
 };
 
 // ---------------- API 키 ----------------
@@ -64,13 +66,14 @@ function getKey(p: Provider): string | null {
 export function keyStatus(): Record<Provider, 'saved' | 'env' | 'none'> {
   const store = readStore();
   const out = {} as Record<Provider, 'saved' | 'env' | 'none'>;
-  for (const p of ['claude', 'openai', 'gemini'] as Provider[]) {
+  for (const p of ['claude', 'openai', 'gemini', 'ollama'] as Provider[]) {
     out[p] = store[p] ? 'saved' : ENV_KEYS[p].some((n) => process.env[n]) ? 'env' : 'none';
   }
   return out;
 }
 
 export function setKey(p: Provider, key: string | null) {
+  if (p === 'ollama' && key && key.trim()) key = normalizeOllamaUrl(key);
   const store = readStore();
   if (key && key.trim()) {
     if (!safeStorage.isEncryptionAvailable()) throw new Error('이 컴퓨터에서는 키를 안전하게 저장할 수 없습니다.');
@@ -89,6 +92,103 @@ function requireKey(p: Provider): string {
   return k;
 }
 
+// ---------------- Ollama (로컬 모델) ----------------
+export const OLLAMA_DEFAULT = 'http://localhost:11434';
+
+/** 서버 주소 정리: http(s) 만, 경로·쿼리는 버린다 */
+function normalizeOllamaUrl(raw: string): string {
+  let v = raw.trim();
+  if (!/^[a-z]+:\/\//i.test(v)) v = 'http://' + v;
+  const u = new URL(v);
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('Ollama 주소는 http:// 또는 https:// 여야 합니다.');
+  if (u.username || u.password) throw new Error('Ollama 주소에 사용자 이름·암호를 넣을 수 없습니다.');
+  return `${u.protocol}//${u.host}`;
+}
+
+function ollamaBase(): string {
+  const v = getKey('ollama');
+  if (!v) return OLLAMA_DEFAULT;
+  try {
+    return normalizeOllamaUrl(v);
+  } catch {
+    return OLLAMA_DEFAULT;
+  }
+}
+
+async function ollamaFetch(pathname: string, init: RequestInit & { signal?: AbortSignal } = {}): Promise<Response> {
+  const base = ollamaBase();
+  let res: Response;
+  try {
+    res = await fetch(base + pathname, init);
+  } catch (e: any) {
+    if (e?.name === 'AbortError') throw e;
+    throw new Error(`Ollama 서버(${base})에 연결하지 못했습니다. Ollama 를 설치하고 실행했는지 확인하세요 (ollama.com).`);
+  }
+  if (!res.ok) {
+    let msg = '';
+    try {
+      msg = ((await res.json()) as any)?.error || '';
+    } catch {
+      /* 무시 */
+    }
+    if (res.status === 404 && /model/i.test(msg)) throw new Error(`모델을 찾을 수 없습니다. 터미널에서 'ollama pull 모델이름' 으로 먼저 받으세요. (${msg})`);
+    throw new Error(`Ollama 오류 (${res.status}): ${msg || res.statusText}`);
+  }
+  return res;
+}
+
+async function listOllamaModels(): Promise<{ id: string; label: string }[]> {
+  const res = await ollamaFetch('/api/tags', { signal: AbortSignal.timeout(5000) });
+  const j = (await res.json()) as { models?: { name: string; details?: { parameter_size?: string } }[] };
+  const out = (j.models || []).map((m) => ({ id: m.name, label: m.details?.parameter_size ? `${m.name} (${m.details.parameter_size})` : m.name }));
+  if (!out.length) throw new Error("Ollama 에 받아 둔 모델이 없습니다. 터미널에서 'ollama pull qwen3' 처럼 모델을 먼저 받으세요.");
+  return out;
+}
+
+async function chatOllama(req: ChatRequest, emit: (e: ChatEvent) => void, signal: AbortSignal) {
+  const res = await ollamaFetch('/api/chat', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: req.model,
+      stream: true,
+      messages: [...(req.system ? [{ role: 'system', content: req.system }] : []), ...req.messages],
+      // 생각하는 모델(qwen3 등)의 생각 글은 받지 않는다
+      think: false,
+    }),
+    signal,
+  });
+  if (!res.body) throw new Error('Ollama 응답이 비어 있습니다.');
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  let note: string | undefined;
+  let model = req.model;
+  const handle = (line: string) => {
+    if (!line.trim()) return;
+    const j = JSON.parse(line);
+    if (j.error) throw new Error('Ollama 오류: ' + j.error);
+    const t = j.message?.content;
+    if (t) emit({ id: req.id, type: 'delta', text: t });
+    if (j.done) {
+      if (j.model) model = j.model;
+      if (j.done_reason === 'length') note = '응답이 최대 길이에 도달해 잘렸습니다.';
+    }
+  };
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i: number;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      handle(buf.slice(0, i));
+      buf = buf.slice(i + 1);
+    }
+  }
+  handle(buf);
+  emit({ id: req.id, type: 'done', model, note });
+}
+
 // ---------------- 모델 목록 ----------------
 export const CLAUDE_MODELS = [
   { id: 'claude-opus-5-5', label: 'Claude Opus 5.5' },
@@ -99,6 +199,7 @@ export const CLAUDE_MODELS = [
 
 export async function listModels(p: Provider): Promise<{ id: string; label: string }[]> {
   if (p === 'claude') return CLAUDE_MODELS;
+  if (p === 'ollama') return listOllamaModels();
   if (p === 'openai') {
     const client = new OpenAI({ apiKey: requireKey('openai') });
     const out: { id: string; label: string }[] = [];
@@ -228,6 +329,7 @@ export async function startChat(req: ChatRequest, emit: (e: ChatEvent) => void) 
   try {
     if (req.provider === 'claude') await chatClaude(req, emit, ctrl.signal);
     else if (req.provider === 'openai') await chatOpenAI(req, emit, ctrl.signal);
+    else if (req.provider === 'ollama') await chatOllama(req, emit, ctrl.signal);
     else await chatGemini(req, emit, ctrl.signal);
   } catch (e: any) {
     emit({ id: req.id, type: 'error', message: friendlyError(req.provider, e) });

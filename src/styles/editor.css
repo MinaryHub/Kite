@@ -552,3 +552,84 @@
 .k-tab[data-leader='5'] {
   background: repeating-linear-gradient(90deg, currentColor 0 3px, transparent 3px 6px) 0 calc(100% - 0.3em) / 100% 1px no-repeat;
 }
+
+/* 줄 높이 고정 (PDF 에서 불러온 문서): 글자 조각은 줄 상자 높이에 관여하지 않고 문단 줄 간격만 쓴다.
+   글꼴마다 위아래 높이가 달라 글꼴이 섞인 줄이 조금씩 높아지는 것을 막는다 (PDF 는 줄 위치가 고정) */
+.workspace.fixed-lines .ProseMirror span {
+  line-height: 0;
+}
+/* 줄 높이 고정 문서(PDF)의 그림은 PDF 크기 그대로: 내어쓰기(음수 text-indent)가 있는 줄에서
+   max-width: 100% 가 그림을 아주 좁게 줄이는 일이 있다 */
+.workspace.fixed-lines .k-image,
+.workspace.fixed-lines .k-image img {
+  max-width: none;
+}
+
+/* 문서 검사 밑줄 (화면에만) */
+.kdoc-content .chk-mark {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+  text-decoration-skip-ink: none;
+}
+.kdoc-content .chk-spelling { text-decoration-color: #d93025; }
+.kdoc-content .chk-spacing { text-decoration-color: #e8710a; }
+.kdoc-content .chk-official { text-decoration-color: #1a73e8; }
+.kdoc-content .chk-plain { text-decoration-color: #188038; }
+.kdoc-content .chk-punct { text-decoration-color: #9334e6; }
+.kdoc-content .chk-ai { text-decoration-color: #7b5cff; }
+.kdoc-content .chk-current { background: rgba(255, 213, 79, 0.45); }
+.print-page .chk-mark { text-decoration: none; background: none; }
+
+/* 변경 내용 (넣음/지움): 사람마다 색 */
+.kdoc-content ins.tc-ins {
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-decoration-color: hsl(var(--tc-hue, 210), 75%, 40%);
+  color: hsl(var(--tc-hue, 210), 75%, 32%);
+  background: hsla(var(--tc-hue, 210), 80%, 50%, 0.08);
+}
+.kdoc-content del.tc-del {
+  text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
+  text-decoration-color: hsl(var(--tc-hue, 0), 70%, 45%);
+  color: hsl(var(--tc-hue, 0), 55%, 45%);
+}
+/* 메모가 달린 글자 */
+.kdoc-content .k-comment {
+  background: rgba(255, 213, 79, 0.38);
+  border-bottom: 1.5px solid #f2b705;
+  cursor: pointer;
+}
+.kdoc-content .k-comment .k-comment {
+  background: rgba(255, 183, 0, 0.5);
+}
+.print-page .k-comment {
+  background: none;
+  border-bottom: none;
+}
+
+/* ===== 수식 ===== */
+.k-math {
+  display: inline-block;
+  cursor: default;
+  border-radius: 2px;
+  padding: 0 1px;
+  line-height: normal;
+  text-indent: 0;
+}
+.k-math .katex {
+  font-size: 1.1em;
+}
+.k-math:hover {
+  background: rgba(37, 99, 235, 0.08);
+}
+.k-math.sel,
+.k-math.ProseMirror-selectednode {
+  outline: 2px solid rgba(37, 99, 235, 0.55);
+}
+.k-math-err {
+  color: #c62828;
+  font-family: monospace;
+}

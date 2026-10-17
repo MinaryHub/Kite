@@ -14,6 +14,8 @@ export interface Glyph {
   w: number;
   size: number;
   font: string;
+  /** pdf.js 글꼴 id (PDF 에 든 글꼴을 다시 쓰기 위해) */
+  fid?: string;
   bold: boolean;
   italic: boolean;
   color: string;
@@ -32,6 +34,8 @@ export interface FillRect {
   color: string;
   /** 이미지 마스크 타일에서 온 것 */
   tile?: boolean;
+  /** 그린 순서 (나중에 칠한 사각형이 먼저 그린 선을 가린다) */
+  z?: number;
 }
 
 export interface Seg {
@@ -43,6 +47,10 @@ export interface Seg {
   w: number;
   color: string;
   style?: 'solid' | 'dashed' | 'dotted';
+  /** 그린 순서 */
+  z?: number;
+  /** 선이 아니라 배경색 경계에서 만든 칸 나눔 (테두리로 그리지 않는다) */
+  ghost?: boolean;
 }
 
 export interface PdfImage {
@@ -52,6 +60,8 @@ export interface PdfImage {
   y1: number;
   /** objs id 또는 인라인 이미지 데이터 */
   ref: string | any;
+  /** 쪽에서 몇 번째 그림 그리기 명령인가 (그 그림만 다시 그릴 때 쓴다 — 그릴 때마다 id 가 바뀐다) */
+  seq?: number;
 }
 
 export interface PageContent {
@@ -61,6 +71,10 @@ export interface PageContent {
   fills: FillRect[];
   segs: Seg[];
   images: PdfImage[];
+  /** 글꼴 id → (유니코드 코드 포인트 → pdf.js fontChar 코드 포인트) */
+  fontChars?: Map<string, Map<number, number>>;
+  /** 표·상자·선으로 옮기지 못한 도형(곡선·사선·다각형 — 화살표, 아이콘, 윤곽선 글씨 등)의 범위 */
+  vectors?: { x0: number; y0: number; x1: number; y1: number; light: boolean }[];
 }
 
 export interface FontInfo {
@@ -75,6 +89,7 @@ export interface FontInfo {
 const MAX_GLYPHS = 60000;
 const MAX_SEGS = 40000;
 const MAX_FILLS = 40000;
+const MAX_VECTORS = 20000;
 
 export const mul = (m1: number[], m2: number[]): Mat => [
   m1[0] * m2[0] + m1[1] * m2[2],
@@ -89,6 +104,10 @@ const apply = (m: number[], x: number, y: number): [number, number] => [m[0] * x
 interface State {
   ctm: Mat;
   fill: string;
+  /** 채우기가 패턴/그러데이션(색을 모름) — 그림으로 채운 도형 등 */
+  fillPattern?: boolean;
+  /** 마지막 잘라내기 경로의 범위 (그러데이션 채우기 영역) */
+  clipBox?: { x0: number; y0: number; x1: number; y1: number } | null;
   stroke: string;
   fillAlpha: number;
   lineWidth: number;
@@ -121,6 +140,19 @@ export function extractPage(ops: { fnArray: number[]; argsArray: any[] }, OPS: R
   const fills: FillRect[] = [];
   const segs: Seg[] = [];
   const images: PdfImage[] = [];
+  const fontChars = new Map<string, Map<number, number>>();
+  let imageSeq = 0;
+  const vectors: { x0: number; y0: number; x1: number; y1: number; light: boolean }[] = [];
+  let z = 0;
+  const addVector = (b: { x0: number; y0: number; x1: number; y1: number }, pad: number, color = '#000000') => {
+    if (vectors.length >= MAX_VECTORS || !isFinite(b.x0 + b.y0 + b.x1 + b.y1)) return;
+    const r = { x0: clampX(b.x0 - pad), y0: clampY(b.y0 - pad), x1: clampX(b.x1 + pad), y1: clampY(b.y1 + pad) };
+    if (r.x1 <= 0 || r.y1 <= 0 || r.x0 >= W || r.y0 >= H || r.x1 - r.x0 < 0.5 || r.y1 - r.y0 < 0.5) return;
+    // 아주 연한 색(워터마크·바탕 장식)인지
+    const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color);
+    const light = !!m && (0.299 * parseInt(m[1], 16) + 0.587 * parseInt(m[2], 16) + 0.114 * parseInt(m[3], 16)) / 255 > 0.85;
+    vectors.push({ ...r, light });
+  };
   let st: State = {
     ctm: viewport.transform.slice(0, 6) as Mat,
     fill: '#000000',
@@ -167,8 +199,8 @@ export function extractPage(ops: { fnArray: number[]; argsArray: any[] }, OPS: R
     const dx = Math.abs(p[0] - q[0]);
     const dy = Math.abs(p[1] - q[1]);
     // 점선을 아주 짧은 조각(0.3pt 안팎)으로 그리는 경우도 있다
-    if (dy < 0.8 && dx > 0.15 && dx >= dy) segs.push({ dir: 'h', pos: (p[1] + q[1]) / 2, a: Math.min(p[0], q[0]), b: Math.max(p[0], q[0]), w, color, style });
-    else if (dx < 0.8 && dy > 0.15 && dy > dx) segs.push({ dir: 'v', pos: (p[0] + q[0]) / 2, a: Math.min(p[1], q[1]), b: Math.max(p[1], q[1]), w, color, style });
+    if (dy < 0.8 && dx > 0.15 && dx >= dy) segs.push({ dir: 'h', pos: (p[1] + q[1]) / 2, a: Math.min(p[0], q[0]), b: Math.max(p[0], q[0]), w, color, style, z: z++ });
+    else if (dx < 0.8 && dy > 0.15 && dy > dx) segs.push({ dir: 'v', pos: (p[0] + q[0]) / 2, a: Math.min(p[1], q[1]), b: Math.max(p[1], q[1]), w, color, style, z: z++ });
   };
 
   const addFillRect = (r0: { x0: number; y0: number; x1: number; y1: number }, color: string, tile = false) => {
@@ -179,16 +211,34 @@ export function extractPage(ops: { fnArray: number[]; argsArray: any[] }, OPS: R
     if (w <= 0 || h <= 0) return;
     if (r.x1 < 0 || r.y1 < 0 || r.x0 > W || r.y0 > H) return;
     // 가는 사각형은 선으로 본다
-    if (!tile && h <= 2.2 && w > 2.5) segs.push({ dir: 'h', pos: (r.y0 + r.y1) / 2, a: r.x0, b: r.x1, w: h, color });
-    else if (!tile && w <= 2.2 && h > 2.5) segs.push({ dir: 'v', pos: (r.x0 + r.x1) / 2, a: r.y0, b: r.y1, w, color });
-    else fills.push({ ...r, color, tile });
+    if (!tile && h <= 2.2 && w > 2.5) segs.push({ dir: 'h', pos: (r.y0 + r.y1) / 2, a: r.x0, b: r.x1, w: h, color, z: z++ });
+    else if (!tile && w <= 2.2 && h > 2.5) segs.push({ dir: 'v', pos: (r.x0 + r.x1) / 2, a: r.y0, b: r.y1, w, color, z: z++ });
+    else fills.push({ ...r, color, tile, z: z++ });
   };
 
   const doPath = (paintOp: number, data: ArrayLike<number> | null) => {
     if (!data) return;
     const isStroke = paintOp === OPS.stroke || paintOp === OPS.closeStroke || paintOp === OPS.fillStroke || paintOp === OPS.eoFillStroke || paintOp === OPS.closeFillStroke || paintOp === OPS.closeEOFillStroke;
     const isFill = paintOp === OPS.fill || paintOp === OPS.eoFill || paintOp === OPS.fillStroke || paintOp === OPS.eoFillStroke || paintOp === OPS.closeFillStroke || paintOp === OPS.closeEOFillStroke;
-    if (!isStroke && !isFill) return;
+    if (!isStroke && !isFill) {
+      // 잘라내기 경로: 뒤따르는 그러데이션 채우기(sh)의 영역으로 기억해 둔다
+      if (paintOp === OPS.endPath) {
+        const m = st.ctm;
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        for (let i = 0; i < data.length; ) {
+          const op = data[i++];
+          const n = op === 0 || op === 1 ? 2 : op === 2 ? 6 : op === 3 ? 4 : 0;
+          for (let k = 0; k + 1 < n; k += 2) {
+            const [px, py] = apply(m, data[i + k], data[i + k + 1]);
+            x0 = Math.min(x0, px); y0 = Math.min(y0, py); x1 = Math.max(x1, px); y1 = Math.max(y1, py);
+          }
+          i += n;
+          if (op > 4) break;
+        }
+        if (isFinite(x0 + y0 + x1 + y1)) st.clipBox = { x0, y0, x1, y1 };
+      }
+      return;
+    }
     // 하위 경로로 나눈다
     const subs: { pts: [number, number][]; curve: boolean; closed: boolean }[] = [];
     let cur: { pts: [number, number][]; curve: boolean; closed: boolean } | null = null;
@@ -226,8 +276,12 @@ export function extractPage(ops: { fnArray: number[]; argsArray: any[] }, OPS: R
       const bb = { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
       const isRect = !s.curve && s.pts.length >= 4 && s.pts.length <= 5 && s.pts.every((p) => (Math.abs(p[0] - bb.x0) < 0.3 || Math.abs(p[0] - bb.x1) < 0.3) && (Math.abs(p[1] - bb.y0) < 0.3 || Math.abs(p[1] - bb.y1) < 0.3));
       const big = bb.x1 - bb.x0 > 12 && bb.y1 - bb.y0 > 8;
+      // 패턴/그러데이션으로 칠한 도형(그림 채우기·그러데이션 상자): 색을 몰라 상자로는 못 옮기므로 그림으로
+      if (isFill && st.fill === 'transparent' && st.fillPattern && st.fillAlpha > 0.15) addVector(bb, 0);
       if (isFill && st.fill !== 'transparent' && st.fillAlpha > 0.15) {
         if (isRect || (s.curve && big && (s.closed || s.pts.length > 4))) addFillRect(bb, st.fill);
+        // 작은 곡선·다각형 채우기(화살표, 아이콘, 윤곽선 글씨): 그림으로 살린다
+        else addVector(bb, 0.5, st.fill);
       }
       if (isStroke && st.stroke !== 'transparent') {
         if (s.curve) {
@@ -237,10 +291,16 @@ export function extractPage(ops: { fnArray: number[]; argsArray: any[] }, OPS: R
             addLine([bb.x0, bb.y1], [bb.x1, bb.y1], lw, st.stroke);
             addLine([bb.x0, bb.y0], [bb.x0, bb.y1], lw, st.stroke);
             addLine([bb.x1, bb.y0], [bb.x1, bb.y1], lw, st.stroke);
-          }
+          } else addVector(bb, lw / 2 + 0.5, st.stroke);
           continue;
         }
-        for (let k = 1; k < s.pts.length; k++) addLine(s.pts[k - 1], s.pts[k], lw, st.stroke);
+        for (let k = 1; k < s.pts.length; k++) {
+          const p = s.pts[k - 1];
+          const q = s.pts[k];
+          // 사선(가로·세로가 아닌 선)은 표·밑줄로 옮길 수 없으므로 그림으로
+          if (Math.abs(p[0] - q[0]) >= 0.8 && Math.abs(p[1] - q[1]) >= 0.8) addVector({ x0: Math.min(p[0], q[0]), y0: Math.min(p[1], q[1]), x1: Math.max(p[0], q[0]), y1: Math.max(p[1], q[1]) }, lw / 2 + 0.5, st.stroke);
+          else addLine(p, q, lw, st.stroke);
+        }
         if (s.closed || paintOp === OPS.closeStroke || paintOp === OPS.closeFillStroke || paintOp === OPS.closeEOFillStroke) addLine(s.pts[s.pts.length - 1], s.pts[0], lw, st.stroke);
       }
     }
@@ -276,8 +336,21 @@ export function extractPage(ops: { fnArray: number[]; argsArray: any[] }, OPS: R
       if (!rotated) {
         const [px, py] = apply(M, st.x + x * hs, st.y + st.rise);
         // 아래아(U+119E, 조합용 자모)로 쓴 가운뎃점은 호환 자모 ㆍ로
-        const ch = typeof g.unicode === 'string' ? g.unicode.replace(/\u119E/g, '\u318D') : '';
-        if (ch && glyphs.length < MAX_GLYPHS && px > -5 && px < W + 5 && py > -5 && py < H + 5)
+        // 제어·서식 문자(폭 없는 공백, BOM 등)는 버린다: 화면 폭이 PDF 와 달라 위치 계산을 흐트러뜨린다
+        const ch = typeof g.unicode === 'string' ? g.unicode.replace(/\u119E/g, '\u318D').replace(/[\p{Cc}\p{Cf}]/gu, '') : '';
+        if (ch && glyphs.length < MAX_GLYPHS && px > -5 && px < W + 5 && py > -5 && py < H + 5) {
+          // 글자 하나 = 코드 포인트 하나일 때만 (합자 fi 등은 글꼴 문자 표에 넣지 않는다)
+          if (st.fontId && typeof g.fontChar === 'string' && g.fontChar && !invisible) {
+            const u = ch.codePointAt(0)!;
+            const fc = g.fontChar.codePointAt(0)!;
+            if (ch.length === (u > 0xffff ? 2 : 1) && g.fontChar.length === (fc > 0xffff ? 2 : 1)) {
+              let m = fontChars.get(st.fontId);
+              if (!m) fontChars.set(st.fontId, (m = new Map()));
+              if (!m.has(u)) m.set(u, fc);
+              // 원래 글자가 아래아(U+119E)였으면 그 코드도 같은 글리프로
+              if (g.unicode !== ch && g.unicode.length === 1 && !m.has(g.unicode.codePointAt(0))) m.set(g.unicode.codePointAt(0), fc);
+            }
+          }
           glyphs.push({
             ch,
             x: px,
@@ -285,6 +358,7 @@ export function extractPage(ops: { fnArray: number[]; argsArray: any[] }, OPS: R
             w: Math.abs(((g.width || 0) * fm[0] * fs + spacing) * hs * xScale),
             size: sizeDev,
             font: font.name,
+            fid: st.fontId || undefined,
             bold,
             italic: font.italic,
             color,
@@ -292,6 +366,7 @@ export function extractPage(ops: { fnArray: number[]; argsArray: any[] }, OPS: R
             hscale: Math.round(hs * 100),
             invisible,
           });
+        }
       }
       x += adv;
     }
@@ -334,20 +409,31 @@ export function extractPage(ops: { fnArray: number[]; argsArray: any[] }, OPS: R
         break;
       case OPS.setFillRGBColor:
         st.fill = typeof a[0] === 'string' ? a[0] : rgbHex(a);
+        st.fillPattern = false;
         break;
       case OPS.setStrokeRGBColor:
         st.stroke = typeof a[0] === 'string' ? a[0] : rgbHex(a);
         break;
       case OPS.setFillTransparent:
         st.fill = 'transparent';
+        st.fillPattern = false;
         break;
       case OPS.setStrokeTransparent:
         st.stroke = 'transparent';
         break;
       case OPS.setFillColorN:
         // 패턴/음영 채우기: 색을 알 수 없다
-        if (typeof a?.[0] === 'string' && /^#/.test(a[0])) st.fill = a[0];
-        else if (a?.[0] === 'TilingPattern' || a?.[0] === 'Shading' || Array.isArray(a?.[0])) st.fill = 'transparent';
+        if (typeof a?.[0] === 'string' && /^#/.test(a[0])) {
+          st.fill = a[0];
+          st.fillPattern = false;
+        } else if (a?.[0] === 'TilingPattern' || a?.[0] === 'Shading' || Array.isArray(a?.[0])) {
+          st.fill = 'transparent';
+          st.fillPattern = true;
+        }
+        break;
+      case OPS.shadingFill:
+        // sh: 잘라내기 영역 안을 그러데이션으로 칠한다
+        if (st.clipBox) addVector(st.clipBox, 0);
         break;
       case OPS.setGState:
         for (const [k, v] of (a?.[0] || []) as [string, any][]) {
@@ -445,14 +531,15 @@ export function extractPage(ops: { fnArray: number[]; argsArray: any[] }, OPS: R
       case OPS.paintImageXObject:
       case OPS.paintInlineImageXObject:
       case OPS.paintImageXObjectRepeat: {
+        const seq = imageSeq++;
         const r = unitRect(st.ctm);
         if (r.x1 - r.x0 < 4 || r.y1 - r.y0 < 4 || images.length >= 500 || !isFinite(r.x0 + r.y0 + r.x1 + r.y1)) break;
-        images.push({ ...r, ref: a[0] });
+        images.push({ ...r, ref: a[0], seq });
         break;
       }
     }
   }
-  return { width: W, height: H, glyphs, fills, segs, images };
+  return { width: W, height: H, glyphs, fills, segs, images, fontChars, vectors };
 }
 
 function rgbHex(a: number[]): string {

@@ -9,6 +9,7 @@ import { insertTableFull } from '../../editor/tableUtil';
 import { applyStyle } from '../Toolbar';
 import { baseName } from '../../formats/common';
 import { SAVE_FORMATS } from '../../formats';
+import { refreshAuthor } from '../../app/review';
 import type { SaveFormatId } from '../../types';
 
 export function TableDialog({ onClose }: { onClose: () => void }) {
@@ -394,6 +395,8 @@ export function PrefsDialog({ onClose }: { onClose: () => void }) {
     app.prefs = p;
     app.savePrefs();
     app.restartAutosave();
+    app.applyTheme();
+    refreshAuthor();
     app.emit();
     onClose();
   };
@@ -401,6 +404,8 @@ export function PrefsDialog({ onClose }: { onClose: () => void }) {
     <Modal title="환경 설정" onClose={onClose} width={460} onEnter={ok} footer={<OkCancel onOk={ok} onCancel={onClose} />}>
       <Fieldset legend="편집">
         <div className="form-grid">
+          <label>사용자 이름</label>
+          <input value={p.userName || ''} placeholder="변경 내용·메모에 남길 이름" onChange={(e) => setP({ ...p, userName: e.target.value })} style={{ width: 200 }} />
           <label>새 문서 기본 글꼴</label>
           <FontCombo value={p.defaultFont} fonts={app.fontList()} onChange={(f) => setP({ ...p, defaultFont: f })} width={200} />
           <label>기본 글자 크기</label>
@@ -414,6 +419,20 @@ export function PrefsDialog({ onClose }: { onClose: () => void }) {
             ))}
           </select>
         </div>
+      </Fieldset>
+      <Fieldset legend="화면">
+        <div className="form-grid">
+          <label>테마</label>
+          <select value={p.theme} onChange={(e) => setP({ ...p, theme: e.target.value as any })}>
+            <option value="system">운영체제 설정을 따름</option>
+            <option value="light">밝게</option>
+            <option value="dark">어둡게</option>
+          </select>
+        </div>
+        <label className="check">
+          <input type="checkbox" checked={p.darkPaper} onChange={(e) => setP({ ...p, darkPaper: e.target.checked })} />
+          어두운 테마에서 종이도 어둡게 (화면에서만, 인쇄는 그대로)
+        </label>
       </Fieldset>
       <Fieldset legend="저장">
         <div className="form-grid">

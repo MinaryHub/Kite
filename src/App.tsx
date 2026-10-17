@@ -13,6 +13,11 @@ import { Dialogs } from './ui/Dialogs';
 import { PreviewModal } from './ui/PreviewModal';
 import { Icon } from './ui/Icon';
 import { AiPanel } from './ui/AiPanel';
+import { CommandPalette } from './ui/CommandPalette';
+import { CheckPanel } from './ui/CheckPanel';
+import { ReviewPanel } from './ui/ReviewPanel';
+import { VersionPanel } from './ui/VersionPanel';
+import { SelectionBubble } from './ui/SelectionBubble';
 import { baseName } from './formats/common';
 
 export function App() {
@@ -26,6 +31,8 @@ export function App() {
       app.openDialog('footnote', { pos: d.pos, text: d.text });
     };
     window.addEventListener('kite:edit-footnote', onFootnote);
+    const onMath = (e: Event) => app.openDialog('math', (e as CustomEvent).detail);
+    window.addEventListener('kite:edit-math', onMath);
     // 브라우저에서 창 닫기 전 경고
     const before = (e: BeforeUnloadEvent) => {
       if (!import.meta.env.DEV && !(window as any).kite && app.docs.some((d) => d.dirty)) {
@@ -37,6 +44,7 @@ export function App() {
     return () => {
       off();
       window.removeEventListener('kite:edit-footnote', onFootnote);
+      window.removeEventListener('kite:edit-math', onMath);
       window.removeEventListener('beforeunload', before);
     };
   }, []);
@@ -59,11 +67,16 @@ export function App() {
         {app.docs.length === 0 && <StartScreen />}
         <FindPanel />
       </div>
+      <CheckPanel />
+      <ReviewPanel />
+      <VersionPanel />
       <AiPanel />
       </div>
       <StatusBar />
       <Dialogs />
       <PreviewModal />
+      <CommandPalette />
+      <SelectionBubble />
       <div className="toast-wrap">
         {app.toasts.map((t) => (
           <div key={t.id} className={'toast ' + t.kind}>

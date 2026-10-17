@@ -1,4 +1,5 @@
 import { DOMParser as PMDOMParser, DOMSerializer, Node as PMNode } from '@tiptap/pm/model';
+import { latexToHwp } from '../math/hwpEq';
 import { getDocSchema } from '../editor/extensions';
 import type { DocSettings, KDocument, LoadedDoc } from '../types';
 import { defaultSettings, docNode, xmlEscape, type JNode } from './common';
@@ -125,6 +126,6 @@ export function writeText(doc: KDocument): string {
 
 function inlineText(n: JNode): string {
   return (n.content || [])
-    .map((c) => (c.type === 'text' ? c.text : c.type === 'hardBreak' ? '\n' : c.type === 'footnote' ? '' : ''))
+    .map((c) => (c.type === 'text' ? c.text : c.type === 'hardBreak' ? '\n' : c.type === 'math' ? c.attrs?.hwp || latexToHwp(c.attrs?.latex || '') : ''))
     .join('');
 }

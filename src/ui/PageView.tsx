@@ -3,7 +3,7 @@ import { EditorContent } from '@tiptap/react';
 import { TextSelection } from '@tiptap/pm/state';
 import type { DocTab } from '../doc/docTab';
 import { useApp } from '../app/hooks';
-import { computeGeom, hfText, hfZones, PAGE_GAP, type PageGeom } from '../print';
+import { computeGeom, hfText, hfZones, PAGE_GAP, pageBackgroundStyle, type PageGeom } from '../print';
 import { formatPageNumber, splitExt } from '../formats/common';
 import { applyFormatPainter, insertImagesFromFiles } from '../app/commands';
 import { viewState } from '../editor/viewState';
@@ -158,7 +158,7 @@ export function PageView({ tab, active, hidden = false }: { tab: DocTab; active:
   for (let k = 0; k < pageCount; k++) {
     const top = k * g.P;
     pages.push(
-      <div key={k} className="paper" style={{ top, width: g.W, height: g.H }}>
+      <div key={k} className="paper" style={{ top, width: g.W, height: g.H, ...(pageBackgroundStyle(s, k) || {}) }}>
         <Corners g={g} />
       </div>,
     );
@@ -167,9 +167,9 @@ export function PageView({ tab, active, hidden = false }: { tab: DocTab; active:
     const last = k === pageCount - 1;
     chrome.push(
       <div key={'m' + k} className="mask" style={{ top: maskTop, width: g.W, height: last ? g.mb : g.mb + g.gap + g.mt }}>
-        <div className="m-paper" style={{ top: 0, height: g.mb }} />
+        <div className="m-paper" style={{ top: 0, height: g.mb, ...(pageBackgroundStyle(s, k, g.mt + g.contentH) || {}) }} />
         {!last && <div className="m-gap" style={{ top: g.mb, height: g.gap }} />}
-        {!last && <div className="m-paper" style={{ top: g.mb + g.gap, height: g.mt }} />}
+        {!last && <div className="m-paper" style={{ top: g.mb + g.gap, height: g.mt, ...(pageBackgroundStyle(s, k + 1) || {}) }} />}
       </div>,
     );
     const num = s.pageNumber.start + k;
@@ -241,7 +241,7 @@ export function PageView({ tab, active, hidden = false }: { tab: DocTab; active:
 
   return (
     <div
-      className={'workspace' + (active ? '' : ' hidden-doc') + (hidden ? ' mp-hidden' : '')}
+      className={'workspace' + (active ? '' : ' hidden-doc') + (hidden ? ' mp-hidden' : '') + (tab.settings.fixedLines ? ' fixed-lines' : '')}
       data-doc={tab.id}
       ref={wsRef}
       onWheel={onWheel}

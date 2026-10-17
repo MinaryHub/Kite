@@ -167,7 +167,12 @@ class SectionWriter {
       }
     };
     for (const it of p.inlines) {
-      if (it.type === 'text') {
+      if (it.type === 'text' && it.math && it.math.hwp.trim()) {
+        // 수식: 한글 수식 개체로 (글자처럼 취급)
+        ensureRun(this.reg.char({ ...it.style, italic: false }), it.link);
+        closeT();
+        xml += this.equation(it.math.hwp, it.style.size || 10, it.style.color || '#000000');
+      } else if (it.type === 'text') {
         ensureRun(this.reg.char(it.style), it.link);
         openT();
         const parts = it.text.split('\t');
@@ -222,6 +227,23 @@ class SectionWriter {
       `<hp:sz width="${w}" widthRelTo="ABSOLUTE" height="${h}" heightRelTo="ABSOLUTE" protect="0"/>` +
       `<hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/>` +
       `<hp:outMargin left="0" right="0" top="0" bottom="0"/></hp:pic>`
+    );
+  }
+
+  /** 한글 수식 개체. 크기는 어림값이며 한글이 열 때 다시 계산한다 */
+  private equation(script: string, sizePt: number, color: string): string {
+    const id = nextId();
+    const base = Math.round(sizePt * 100);
+    const plain = script.replace(/\b(over|sqrt|root|of|from|to|LEFT|RIGHT|left|right|matrix|pmatrix|bmatrix|cases|rm|it|bold)\b|[{}~`]/g, '').replace(/\s+/g, '');
+    const tall = /\b(over|matrix|pmatrix|bmatrix|dmatrix|cases|sum|int|prod|lim)\b/i.test(script);
+    const w = Math.max(base, Math.round(plain.length * base * 0.55) + 200);
+    const h = Math.round(base * (tall ? 2.4 : 1.25));
+    return (
+      `<hp:equation id="${id}" zOrder="${this.zOrder++}" numberingType="EQUATION" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" version="Equation Version 60" baseLine="${tall ? 65 : 86}" textColor="${xmlEscape(color)}" baseUnit="${base}" lineMode="CHAR" font="HancomEQN">` +
+      `<hp:sz width="${w}" widthRelTo="ABSOLUTE" height="${h}" heightRelTo="ABSOLUTE" protect="0"/>` +
+      `<hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="PARA" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/>` +
+      `<hp:outMargin left="56" right="56" top="0" bottom="0"/><hp:shapeComment>수식입니다.</hp:shapeComment>` +
+      `<hp:script>${xmlEscape(script)}</hp:script></hp:equation>`
     );
   }
 
@@ -410,7 +432,7 @@ function headerXml(reg: Registry): string {
     .map((c, i) => {
       const f = reg.font(c.font);
       let x = `<hh:charPr id="${i}" height="${ptToHwp(c.size)}" textColor="${normColor(c.color) || '#000000'}" shadeColor="${normColor(c.highlight) || 'none'}" useFontSpace="0" useKerning="0" symMark="NONE" borderFillIDRef="2">`;
-      x += `<hh:fontRef ${langAttrs(f)}/><hh:ratio ${langAttrs(c.fontWidth || 100)}/><hh:spacing ${langAttrs(Math.round(c.letterSpacing || 0))}/><hh:relSz ${langAttrs(100)}/><hh:offset ${langAttrs(0)}/>`;
+      x += `<hh:fontRef ${langAttrs(f)}/><hh:ratio ${langAttrs(c.fontWidth || 100)}/><hh:spacing ${langAttrs(Math.max(-50, Math.min(50, Math.round(c.letterSpacing || 0))))}/><hh:relSz ${langAttrs(100)}/><hh:offset ${langAttrs(0)}/>`;
       if (c.italic) x += '<hh:italic/>';
       if (c.bold) x += '<hh:bold/>';
       x += `<hh:underline type="${c.underline ? 'BOTTOM' : 'NONE'}" shape="SOLID" color="#000000"/>`;

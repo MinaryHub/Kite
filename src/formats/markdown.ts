@@ -67,6 +67,10 @@ export function writeMarkdown(doc: KDocument): string {
       return `[^${notes.length}]`;
     },
   });
+  td.addRule('math', {
+    filter: (node) => node.nodeName === 'SPAN' && (node as HTMLElement).hasAttribute('data-latex'),
+    replacement: (_c, node) => `$${(node as HTMLElement).getAttribute('data-latex') || ''}$`,
+  });
   td.addRule('pagebreak', {
     filter: (node) => (node as HTMLElement).getAttribute?.('data-type') === 'page-break',
     replacement: () => '\n\n<!-- pagebreak -->\n\n',
