@@ -275,7 +275,7 @@ function measurer(): LayoutCtx['measure'] {
   if (!mc) return undefined;
   const cache = new Map<string, number>();
   return (text, family, sizePt, bold, italic) => {
-    const font = `${italic ? 'italic ' : ''}${bold ? 'bold ' : ''}${sizePt}pt ${fontStack(family || DEFAULT_FONT)}`;
+    const font = `${italic ? 'italic ' : ''}${bold ? 'bold ' : ''}${sizePt}pt ${fontStack(family || DEFAULT_FONT, { canvas: true })}`;
     const key = font + '|' + text;
     let w = cache.get(key);
     if (w == null) {

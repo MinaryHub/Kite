@@ -440,10 +440,39 @@ input[type='number'] {
   cursor: default;
   white-space: nowrap;
 }
+.doc-tab {
+  color: var(--c-text-dim);
+  position: relative;
+}
+.doc-tab:not(.active):hover {
+  background: var(--c-hover);
+  color: var(--c-text);
+}
+/* 편집 중인 탭: 문서와 이어지는 바탕, 위쪽 강조선, 굵은 제목 */
 .doc-tab.active {
   background: var(--c-surface);
-  height: 28px;
+  color: var(--c-text);
+  height: 29px;
   margin-bottom: -1px;
+  border-color: var(--c-border-strong);
+  box-shadow: 0 -1px 4px rgba(0, 0, 0, 0.08);
+  z-index: 1;
+}
+.doc-tab.active::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  right: -1px;
+  top: -1px;
+  height: 3px;
+  border-radius: 4px 4px 0 0;
+  background: var(--c-accent);
+}
+.doc-tab.active .dt-title {
+  font-weight: 700;
+}
+.doc-tab:not(.active) svg {
+  opacity: 0.6;
 }
 .doc-tab .dt-title {
   overflow: hidden;
@@ -2510,4 +2539,13 @@ input[type='number'] {
 }
 .tpl-paper .kdoc-content {
   outline: none;
+}
+
+/* 어두운 테마: 편집 중인 탭 바탕을 한 단계 띄운다 */
+:root[data-theme='dark'] .doc-tab.active {
+  background: color-mix(in srgb, var(--c-accent) 16%, var(--c-surface));
+  box-shadow: 0 -1px 6px rgba(0, 0, 0, 0.4);
+}
+:root[data-theme='dark'] .doc-tab:not(.active) {
+  background: transparent;
 }

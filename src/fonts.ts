@@ -203,7 +203,9 @@ export const embeddedAliases = new Map<string, string>();
  */
 export async function registerEmbeddedFont(family: string, data: Uint8Array, opts: { weight: string; style: string; unicodeRange: string; alias?: boolean }): Promise<boolean> {
   if (typeof FontFace === 'undefined' || typeof document === 'undefined') return false;
-  const name = opts.alias ? family.trim() + ' kite-pdf' : family;
+  // 항상 따로 된 이름으로 올린다. 원래 이름(예: 맑은 고딕)으로 올리면 화면 글꼴과 다른 문서까지 PDF 의 일부 글자(굵은 판 등)로 그려진다.
+  // 이 이름은 그 PDF 문서를 보고 있을 때만 CSS 변수(pdfFontVar)로 글꼴 목록 앞에 끼워진다.
+  const name = family.trim() + ' kite-pdf';
   try {
     const buf = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
     // 위아래 높이를 모든 PDF 글꼴에 같게: 글꼴이 섞인 줄이 줄 간격보다 높아지지 않게 한다
@@ -219,8 +221,8 @@ export async function registerEmbeddedFont(family: string, data: Uint8Array, opt
     } as FontFaceDescriptors);
     await face.load();
     document.fonts.add(face);
-    if (opts.alias) embeddedAliases.set(family.trim(), name);
-    else embeddedFamilies.add(family.trim());
+    embeddedAliases.set(family.trim(), name);
+    if (!opts.alias) embeddedFamilies.add(family.trim());
     return true;
   } catch (e) {
     console.warn('PDF 글꼴을 올리지 못했습니다:', family, e);
@@ -271,15 +273,42 @@ export function fontWeightFallback(name: string): string | null {
   return '700';
 }
 
+/** PDF 글꼴을 켜는 CSS 변수 이름 (글꼴 이름마다 하나) */
+export function pdfFontVar(family: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < family.length; i++) h = Math.imul(h ^ family.charCodeAt(i), 16777619);
+  return '--kpf-' + (h >>> 0).toString(36);
+}
+
+let pdfVarsOn: string[] = [];
+/** 지금 보고 있는 문서의 PDF 글꼴만 켠다 (다른 문서·화면 글자에는 쓰이지 않게) */
+export function applyPdfFontVars(families: string[]) {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement.style;
+  for (const v of pdfVarsOn) root.removeProperty(v);
+  pdfVarsOn = [];
+  for (const f of new Set(families.map((x) => x.trim()))) {
+    const name = embeddedAliases.get(f);
+    if (!name) continue;
+    const v = pdfFontVar(f);
+    root.setProperty(v, `'${name.replace(/['"\\]/g, '')}'`);
+    pdfVarsOn.push(v);
+  }
+}
+
 /** 설치되지 않은 글꼴을 위한 대체 글꼴 목록 (한글처럼 명조/고딕 계열 유지) */
-export function fontStack(name: string): string {
+export function fontStack(name: string, opts: { canvas?: boolean } = {}): string {
   // 문서에서 온 글꼴 이름이므로 CSS 구문을 바꿀 수 있는 문자는 모두 제거
   const safe = name.replace(/[\u0000-\u001f\u007f'"\\;:{}()<>@[\]]/g, '').trim().slice(0, 80) || '함초롬바탕';
   // 그 이름으로는 못 그리지만 다른 이름(영문 이름·HY 이름)으로 설치되어 있으면 그 이름을 먼저 둔다
   const alias = fontUsable(safe) ? null : usableAlias(safe);
-  const pdfAlias = embeddedAliases.get(safe);
-  // PDF 판(같은 글꼴의 일부 글자)은 앞에 둔다: PDF 와 같은 글리프·높이로 그리고, 없는 글자는 시스템 글꼴로
-  const q = (pdfAlias ? `'${pdfAlias.replace(/['"\\]/g, '')}', ` : '') + (alias ? `'${alias}', '${safe}'` : `'${safe}'`);
+  // PDF 판(같은 글꼴의 일부 글자)은 앞에 둔다: PDF 와 같은 글리프·높이로 그리고, 없는 글자는 시스템 글꼴로.
+  // 그 PDF 문서를 보고 있을 때만 값이 들어가는 CSS 변수라, 다른 문서나 화면 글자에는 끼어들지 않는다.
+  // (글꼴을 나중에 올려도 다시 그리지 않고 바로 쓰이도록 변수는 늘 넣어 둔다)
+  // 캔버스(글자 폭 재기)는 CSS 변수를 풀지 못하므로 PDF 글꼴 이름을 바로 쓴다
+  const direct = embeddedAliases.get(safe);
+  const pdfAlias = opts.canvas ? (direct ? `'${direct.replace(/['"\\]/g, '')}', ` : '') : `var(${pdfFontVar(safe)}, kite-none), `;
+  const q = pdfAlias + (alias ? `'${alias}', '${safe}'` : `'${safe}'`);
   if (/D2Coding|Consolas|Courier|Mono|코딩/i.test(name)) return `${q}, D2Coding, Consolas, monospace`;
   // kite-sym: 가운뎃점(·) 등 몇몇 기호만 맡는 글꼴(editor.css 의 @font-face, unicode-range).
   // 휴먼명조·HY 계열 글꼴은 이 기호를 전각으로 그리지만 한글은 기호 글꼴로 반각으로 보여 주므로 그에 맞춘다.

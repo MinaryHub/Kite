@@ -5,7 +5,7 @@ import { baseName, splitExt, MAX_IMPORT_BYTES } from '../formats/common';
 import type { SaveFormatId } from '../types';
 import { withPrintRoot } from '../print';
 import { viewState } from '../editor/viewState';
-import { KOREAN_FONTS, LATIN_FONTS, installedFonts, privateFontNames, ensurePrivateFonts, collectFontNames, registerPdfFonts } from '../fonts';
+import { KOREAN_FONTS, LATIN_FONTS, installedFonts, privateFontNames, ensurePrivateFonts, collectFontNames, registerPdfFonts, applyPdfFontVars, embeddedAliases } from '../fonts';
 
 import * as versions from './versions';
 
@@ -155,7 +155,25 @@ export class AppController {
   }
 
   emit() {
+    this.syncPdfFontVars();
     this.listeners.forEach((f) => f());
+  }
+
+  private pdfVarsKey = '';
+  /** 지금 보고 있는 문서의 PDF 글꼴만 켠다 */
+  private syncPdfFontVars() {
+    const tab = this.active;
+    const fams = (tab?.settings.pdfFonts || []).map((f: any) => String(f.family || ''));
+    const key = (tab?.id || '') + '|' + fams.length + '|' + embeddedAliases.size;
+    if (key === this.pdfVarsKey) return;
+    this.pdfVarsKey = key;
+    applyPdfFontVars(fams);
+    // 글꼴이 바뀌었으니 쪽 배치를 다시 잰다 (글꼴을 다 받은 뒤에도 한 번 더)
+    if (tab && fams.length) {
+      const relayout = () => tab.editor.storage.pagination?.schedule?.();
+      relayout();
+      void document.fonts?.ready.then(relayout);
+    }
   }
 
   set(p: Partial<AppController>) {
@@ -282,7 +300,7 @@ export class AppController {
   /** 문서가 쓰는 글꼴 가운데 한컴 폴더에만 있는 것과 문서에 담긴 PDF 글꼴을 올린다 */
   private loadDocFonts(tab: DocTab) {
     // PDF 에서 꺼낸 글꼴 (자동 저장에서 복구한 문서도 같은 글꼴로)
-    if (tab.settings.pdfFonts) void registerPdfFonts(tab.settings.pdfFonts);
+    if (tab.settings.pdfFonts) void registerPdfFonts(tab.settings.pdfFonts).then(() => this.emit());
     if (!privateFontNames.size) return;
     const names = collectFontNames(tab.editor.getJSON());
     void ensurePrivateFonts(names, (n) => platform.readPrivateFont(n));
