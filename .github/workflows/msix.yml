@@ -6,6 +6,8 @@ name: MSIX 빌드
 
 on:
   workflow_dispatch:
+  push:
+    branches: [build/msix]
 
 jobs:
   msix:
