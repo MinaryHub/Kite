@@ -75,8 +75,11 @@ HWP·HWPX 저장 결과는 한글 2018에서 실제로 열어 확인했습니다
 ## Microsoft Store 배포
 
 ```
-npm run dist:store      # 윈도우에서 실행 → release/*.appx (MSIX)
+npm run dist:msix       # 맥·윈도우 어디서나 → release/Kite-<버전>-x64.msix (스토어 제출용, 서명 없음)
+npm run dist:store      # 윈도우에서만: electron-builder 의 makeappx 로 → release/*.appx
 ```
+
+`dist:msix` 는 `scripts/pack-msix.mjs` 가 윈도우 도구 없이 MSIX 규격(OPC 꾸러미, 64KB 블록 지도)대로 직접 묶는다. 스토어 제출 패키지는 Microsoft 가 서명하므로 서명하지 않는다. 직접 설치해 시험하려면 서명해야 한다.
 
 제출 전에 채울 값:
 
