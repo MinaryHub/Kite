@@ -1,0 +1,60 @@
+Kite 워드프로세서 개인정보 처리방침
+시행일: 2026년 10월 18일
+
+Kite 워드프로세서(이하 "Kite")는 문서를 사용자의 컴퓨터에서 편집하는 프로그램입니다. Kite 개발사(SMIC)는 사용자의 문서나 개인정보를 수집·저장하지 않습니다.
+
+1. 수집하는 정보
+Kite 개발사는 사용자 정보를 수집하지 않습니다. 회원 가입, 사용 통계(원격 측정), 광고, 추적 기능이 없습니다.
+
+2. 이 컴퓨터에만 저장하는 정보
+다음 정보는 사용자의 컴퓨터 안에만 저장되며 개발사로 전송되지 않습니다.
+- 문서 파일(사용자가 고른 위치)
+- 환경 설정, 최근 문서 목록, 사용자 이름(변경 내용·메모 작성자 표시용)
+- 자동 저장본과 버전 기록(문서 사본)
+- AI 서비스 API 키(운영체제 보안 저장소로 암호화해 보관)
+프로그램을 지우거나 설정에서 삭제하면 함께 지워집니다.
+
+3. 외부로 전송되는 경우
+Kite는 사용자가 아래 기능을 직접 실행할 때만 정보를 외부로 보냅니다.
+- AI 도우미, 선택 영역 AI 고치기, AI 교정: 사용자의 요청과 함께 고른 문서 내용(선택 영역 또는 문서 전체)을 사용자가 고른 AI 회사(Anthropic, OpenAI, Google)로 보냅니다. 처음 보낼 때 전송 사실을 알리고 동의를 받습니다. 전송된 내용의 처리는 각 회사의 약관과 개인정보 처리방침을 따릅니다.
+- Ollama 로컬 모델: 위 내용을 사용자의 컴퓨터 또는 사용자가 지정한 Ollama 서버로 보냅니다.
+- AI 앱 연결(MCP): AI 앱이 요청한 문서 내용을 사용자가 허용한, 같은 컴퓨터의 AI 앱으로 보냅니다.
+- 실시간 공동 편집(실험): 공유한 문서의 내용, 커서 위치, 사용자 이름을 접속 코드를 받은 같은 네트워크의 참가자에게 보냅니다. 이 통신은 접속 코드로 보호되지만 암호화되지 않으므로 신뢰할 수 있는 네트워크에서만 쓰세요.
+- AI 응답 신고: 신고한 AI 응답 글과 AI 회사·모델 이름을 사용자가 메일로 직접 개발사에 보냅니다.
+개인정보가 담긴 문서는 보내기 전에 "도구 → 개인정보 찾기·가림"으로 가리거나 Ollama를 쓰는 것을 권합니다.
+
+4. 아동의 개인정보
+Kite는 개인정보를 수집하지 않으므로 아동의 개인정보도 수집하지 않습니다.
+
+5. 문의
+이 방침에 대한 문의: [문의 이메일]
+방침이 바뀌면 이 문서와 앱 안의 내용을 함께 고칩니다.
+
+------------------------------------------------------------
+
+Kite Word Processor Privacy Policy
+Effective date: October 18, 2026
+
+Kite Word Processor ("Kite") edits documents on your computer. The developer of Kite (SMIC) does not collect or store your documents or personal information.
+
+1. Information we collect
+We do not collect any information about you. Kite has no account sign-up, usage analytics (telemetry), advertising, or tracking.
+
+2. Information stored only on your computer
+The following stays on your computer and is never sent to us: your document files; settings, recent files and your display name (used as the author of tracked changes and comments); autosaves and version history; and AI service API keys, which are encrypted with the operating system's secure storage. They are removed when you uninstall Kite or delete them in settings.
+
+3. When information is sent outside your computer
+Kite sends information only when you use the following features yourself:
+- AI assistant, AI rewrite of a selection, AI proofreading: your request and the document content you chose (the selection or the whole document) are sent to the AI provider you selected (Anthropic, OpenAI or Google). Kite asks for your consent before the first transfer. The provider processes the content under its own terms and privacy policy.
+- Ollama local models: the same content is sent to your own computer or to the Ollama server you specify.
+- AI app connection (MCP): document content requested by an AI app you have allowed, running on the same computer.
+- Real-time co-editing (experimental): the shared document content, cursor position and your display name are sent to participants on the same network who have the access code. This traffic is protected by the access code but is not encrypted; use it only on trusted networks.
+- Reporting an AI response: you send the reported AI response and the provider/model name to us by email yourself.
+For documents that contain personal information, we recommend masking it first with Tools > Find & Mask Personal Information, or using Ollama.
+
+4. Children's privacy
+Kite does not collect personal information, including that of children.
+
+5. Contact
+Questions about this policy: [contact email]
+If this policy changes, we will update this text and the copy in the app.
