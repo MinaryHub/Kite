@@ -1,7 +1,7 @@
 {
   "name": "kite",
   "productName": "Kite",
-  "version": "0.1.6",
+  "version": "1.0.0",
   "description": "HWP/HWPX/DOCX/DOC/PDF/MD 문서 편집기",
   "author": "SMIC",
   "license": "UNLICENSED",
@@ -57,9 +57,9 @@
     },
     "electronDist": "node_modules/electron/dist",
     "appx": {
-      "identityName": "PARTNER_CENTER_IDENTITY_NAME",
-      "publisher": "CN=PARTNER-CENTER-PUBLISHER-ID",
-      "publisherDisplayName": "SMIC",
+      "identityName": "minary.KiteWord",
+      "publisher": "CN=C460CD23-2642-4BA2-A332-6F8ADBE54E1F",
+      "publisherDisplayName": "minary",
       "displayName": "Kite 워드프로세서",
       "applicationId": "Kite",
       "languages": [

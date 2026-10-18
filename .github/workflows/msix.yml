@@ -1,0 +1,37 @@
+# Microsoft Store 용 MSIX 만들기 (윈도우에서만 만들 수 있어 GitHub 의 윈도우 실행기를 쓴다)
+# 실행: GitHub → Actions → "MSIX 빌드" → Run workflow
+# Partner Center 식별 값은 package.json 의 build.appx 에 들어 있다.
+# 바꿔야 할 때만 저장소 Variables(APPX_IDENTITY_NAME, APPX_PUBLISHER, APPX_PUBLISHER_DISPLAY_NAME)로 덮어쓴다.
+name: MSIX 빌드
+
+on:
+  workflow_dispatch:
+
+jobs:
+  msix:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: MSIX 포장
+        shell: pwsh
+        run: |
+          $args = @('--win', 'appx', '--x64', '--publish', 'never')
+          if ($env:IDN) { $args += "-c.appx.identityName=$env:IDN" }
+          if ($env:PUB) { $args += "-c.appx.publisher=$env:PUB" }
+          if ($env:PDN) { $args += "-c.appx.publisherDisplayName=$env:PDN" }
+          npx electron-builder @args
+        env:
+          IDN: ${{ vars.APPX_IDENTITY_NAME }}
+          PUB: ${{ vars.APPX_PUBLISHER }}
+          PDN: ${{ vars.APPX_PUBLISHER_DISPLAY_NAME }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kite-msix
+          path: release/*.appx
+          if-no-files-found: error

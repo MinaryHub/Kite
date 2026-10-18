@@ -80,7 +80,7 @@ npm run dist:store      # 윈도우에서 실행 → release/*.appx (MSIX)
 
 제출 전에 채울 값:
 
-- `package.json` → `build.appx` 의 `identityName`, `publisher`, `publisherDisplayName`: Partner Center 의 "제품 ID" 화면 값으로 바꾼다
+- `package.json` → `build.appx` 의 식별 값은 Partner Center 값(minary.KiteWord, 게시자 minary)으로 넣어 두었다. `displayName` 은 Partner Center 에 예약한 앱 이름과 같아야 한다
 - `src/appInfo.ts` → `SUPPORT_EMAIL`(AI 응답 신고·문의 주소), `PRIVACY_URL`(아래 처리방침을 올린 웹 주소)
 - `PRIVACY.md` 의 문의처. 이 내용을 웹에 올리고 그 주소를 Partner Center 의 개인정보 처리방침 칸에도 넣는다
 
