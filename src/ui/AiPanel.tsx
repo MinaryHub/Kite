@@ -1,3 +1,5 @@
+import { reportAiResponse } from '../ai/report';
+import { ensureAiConsent } from '../ai/consent';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { renderMarkdown } from './aiMarkdown';
 import { AiDesktopPanel } from './AiDesktopPanel';
@@ -182,6 +184,8 @@ export function AiPanel() {
       app.toast('문서가 너무 커서 보낼 수 없습니다. 필요한 부분을 선택한 뒤 "선택 영역"으로 보내 주세요.', 'warn', 6000);
       return;
     }
+    // 클라우드 AI 로 처음 보낼 때 동의를 받는다 (거부하면 입력은 그대로 둔다)
+    if (!(await ensureAiConsent(provider))) return;
     const sent = ctx ? `${text.trim()}\n\n<${ctx.label}>\n${ctx.text}\n</${ctx.label}>` : text.trim();
     const id = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const history = msgs.filter((m) => !m.error && !m.pending && m.text).map((m) => ({ role: m.role, content: m.role === 'user' ? m.sent || m.text : m.text }));
@@ -370,11 +374,16 @@ ${href.slice(0, 500)}
                 <button className="link-btn" disabled={!hasSel} title={hasSel ? '' : '문서에서 바꿀 부분을 먼저 선택하세요'} onClick={() => insert(m.text, true)}>
                   선택 영역 바꾸기
                 </button>
+                <span style={{ flex: 1 }} />
+                <button className="link-btn ai-report" title="부적절하거나 사실과 다른 응답 신고" onClick={() => reportAiResponse({ provider: pname(m.provider), model: m.model, text: m.text })}>
+                  신고
+                </button>
               </div>
             )}
           </div>
         ))}
       </div>
+      <div className="ai-disclaimer">AI가 만든 내용은 틀리거나 부적절할 수 있습니다. 확인한 뒤 쓰세요.</div>
       <div className="ai-input">
         <textarea
           ref={inputRef}

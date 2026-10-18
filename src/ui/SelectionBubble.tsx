@@ -5,6 +5,7 @@ import { useApp, useEditorTick } from '../app/hooks';
 import { app } from '../app/controller';
 import { Icon } from './Icon';
 import { aiAvailable, aiComplete, currentAi } from '../ai/client';
+import { reportAiResponse } from '../ai/report';
 import { listChanges, newChangeId, resolveChanges, TRACK_SKIP } from '../editor/extensions/trackChanges';
 
 /**
@@ -28,7 +29,7 @@ const SYSTEM = `당신은 한국어 문서 편집기 Kite 의 글쓰기 도우�
 - 문단 구분은 빈 줄 하나로 나타냅니다.
 - 고유 명사·숫자·날짜는 바꾸지 마세요.`;
 
-type Phase = { kind: 'idle' } | { kind: 'menu' } | { kind: 'ask' } | { kind: 'busy'; text: string } | { kind: 'done'; changeId: string };
+type Phase = { kind: 'idle' } | { kind: 'menu' } | { kind: 'ask' } | { kind: 'busy'; text: string } | { kind: 'done'; changeId: string; text: string };
 
 export function SelectionBubble() {
   const appState = useApp();
@@ -95,7 +96,7 @@ export function SelectionBubble() {
         return;
       }
       const id = applySuggestion(from, to, out);
-      setPhase(id ? { kind: 'done', changeId: id } : { kind: 'idle' });
+      setPhase(id ? { kind: 'done', changeId: id, text: out } : { kind: 'idle' });
     } catch (e: any) {
       if (!c.signal.aborted) app.toast(String(e?.message || e), 'error', 6000);
       setPhase({ kind: 'idle' });
@@ -171,12 +172,16 @@ export function SelectionBubble() {
       ) : phase.kind === 'done' ? (
         <>
           <Icon name="Sparkles" size={14} />
-          <span className="sb-note">AI 제안을 넣었습니다</span>
+          <span className="sb-note" title="AI가 만든 내용은 틀리거나 부적절할 수 있습니다">AI 제안 · 확인 후 받아들이세요</span>
           <button className="sb-btn primary" onClick={() => resolveDone(true)} title="받아들이기">
             <Icon name="Check" size={14} /> 받아들이기
           </button>
           <button className="sb-btn" onClick={() => resolveDone(false)} title="되돌리기">
             <Icon name="Undo" size={14} /> 되돌리기
+          </button>
+          <span className="sb-sep" />
+          <button className="sb-btn" title="부적절하거나 사실과 다른 응답 신고" onClick={() => phase.kind === 'done' && reportAiResponse({ provider: currentAi().provider, model: currentAi().model, text: phase.text })}>
+            신고
           </button>
         </>
       ) : phase.kind === 'ask' ? (

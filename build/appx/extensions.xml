@@ -1,0 +1,8 @@
+
+        <!-- AI 앱(Claude 데스크톱 등)이 Kite 를 MCP 서버로 실행할 수 있게 하는 실행 별칭: %LOCALAPPDATA%\Microsoft\WindowsApps\kite-word.exe
+             이름을 바꾸면 electron/flags.ts 의 STORE_EXEC_ALIAS 도 함께 바꾼다 -->
+        <uap3:Extension Category="windows.appExecutionAlias" Executable="app\Kite.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap3:AppExecutionAlias>
+            <desktop:ExecutionAlias Alias="kite-word.exe" />
+          </uap3:AppExecutionAlias>
+        </uap3:Extension>

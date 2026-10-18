@@ -10,6 +10,7 @@ import { applyStyle } from '../Toolbar';
 import { baseName } from '../../formats/common';
 import { SAVE_FORMATS } from '../../formats';
 import { refreshAuthor } from '../../app/review';
+import { HWP_NOTICE } from '../../appInfo';
 import type { SaveFormatId } from '../../types';
 
 export function TableDialog({ onClose }: { onClose: () => void }) {
@@ -547,8 +548,20 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
       <p style={{ lineHeight: 1.6 }}>
         한글(HWP 5.0 / HWPX)·워드·PDF·마크다운 문서를 열어 편집하고 HWPX, HWP, DOCX, PDF, MD, HTML, TXT 형식으로 저장할 수 있습니다.
         <br />
-        HWP/HWPX는 한글과컴퓨터의 공개 문서 형식을 참고하여 구현하였습니다.
       </p>
+      <p className="unit" style={{ lineHeight: 1.6 }}>
+        {HWP_NOTICE}
+        <br />
+        HWPX 는 국가 표준 KS X 6101(개방형 문서 형식, OWPML)을 따릅니다. 한글·한컴은 한글과컴퓨터의 상표이며, Kite 는 한글과컴퓨터와 관계가 없습니다.
+      </p>
+      <div className="row" style={{ gap: 6 }}>
+        <button className="btn small" onClick={() => app.openDialog('legal', { kind: 'privacy' })}>
+          개인정보 처리방침
+        </button>
+        <button className="btn small" onClick={() => app.openDialog('legal', { kind: 'licenses' })}>
+          오픈소스 라이선스
+        </button>
+      </div>
       {app.active?.path && <div className="unit">현재 문서: {baseName(app.active.path)}</div>}
     </Modal>
   );

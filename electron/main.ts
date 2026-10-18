@@ -5,6 +5,7 @@ import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { initMcpHost, isMcpBridge, runMcpBridge } from './mcp';
 import { setupCollab } from './collab';
+import { STORE_BUILD } from './flags';
 import { listPrivateFonts, readPrivateFont } from './fonts';
 
 /** AI 앱이 실행한 MCP 다리(Kite.exe --mcp): 창 없이 표준 입출력으로만 동작한다 */
@@ -545,18 +546,25 @@ ipcMain.handle('app:close-confirmed', () => {
 ipcMain.handle('app:toggle-fullscreen', () => mainWindow?.setFullScreen(!mainWindow.isFullScreen()));
 ipcMain.handle('app:version', () => app.getVersion());
 
+ipcMain.handle('app:flags', () => ({ store: STORE_BUILD }));
+
 // ---------------- PowerShell ----------------
 const POWERSHELL = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-/** 스크립트를 -EncodedCommand 로 넘긴다 (따옴표/공백 해석 문제가 없다) */
-function runPowerShell(script: string, opts: { timeout?: number; maxBuffer?: number } = {}): Promise<{ ok: boolean; stdout: string }> {
-  const encoded = Buffer.from(script, 'utf16le').toString('base64');
+/**
+ * 스크립트를 표준 입력으로 넘긴다 (-Command -).
+ * 실행 정책을 건너뛰는 옵션(-ExecutionPolicy Bypass)이나 인코딩된 명령(-EncodedCommand)은 쓰지 않는다:
+ * 악성 코드가 흔히 쓰는 형태라 스토어 심사·백신에 걸릴 수 있다. 표준 입력의 명령은 실행 정책 대상도 아니다.
+ * 스크립트는 ASCII 만 쓰고, 파일 경로 같은 값은 환경 변수(env)로 넘긴다 (콘솔 코드 페이지와 상관없이 한글 경로가 안전).
+ */
+function runPowerShell(script: string, opts: { timeout?: number; maxBuffer?: number; env?: Record<string, string> } = {}): Promise<{ ok: boolean; stdout: string }> {
   return new Promise((resolve) => {
-    execFile(
+    const child = execFile(
       POWERSHELL,
-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
-      { timeout: opts.timeout ?? 60000, maxBuffer: opts.maxBuffer ?? 4 * 1024 * 1024, windowsHide: true },
+      ['-NoProfile', '-NonInteractive', '-Command', '-'],
+      { timeout: opts.timeout ?? 60000, maxBuffer: opts.maxBuffer ?? 4 * 1024 * 1024, windowsHide: true, env: { ...process.env, ...(opts.env || {}) } },
       (err, stdout) => resolve({ ok: !err, stdout: String(stdout || '') }),
     );
+    child.stdin?.end(script + '\r\nexit $LASTEXITCODE\r\n');
   });
 }
 
@@ -597,9 +605,10 @@ ipcMain.handle('fonts:list', async () => {
 });
 
 // 한컴오피스가 자기 폴더에만 두는 글꼴 (HY헤드라인M 등): 이름 목록과 파일 바이트
-ipcMain.handle('fonts:private-list', async () => listPrivateFonts().map((f) => f.names));
+// 스토어판에서는 쓰지 않는다: 한컴오피스용으로 허가된 글꼴을 다른 앱에서 쓰는 것은 라이선스 문제가 될 수 있다
+ipcMain.handle('fonts:private-list', async () => (STORE_BUILD ? [] : listPrivateFonts().map((f) => f.names)));
 ipcMain.handle('fonts:private-read', async (_e, name: unknown) => {
-  if (typeof name !== 'string') return null;
+  if (STORE_BUILD || typeof name !== 'string') return null;
   return readPrivateFont(name);
 });
 
@@ -617,7 +626,7 @@ ipcMain.handle('doc:convert', async (_e, data: Uint8Array) => {
       // 우리가 새로 띄운 경우에만 숨기고 종료한다.
       // 신뢰할 수 없는 문서이므로 매크로를 강제로 끄고(AutomationSecurity=3) 연결 갱신도 막는다.
       // 임시 파일에 다시 쓰면 다운로드 표식(MOTW)이 사라져 Office 의 매크로 차단이 적용되지 않기 때문이다.
-      const q = (p: string) => `'${p.replace(/'/g, "''")}'`;
+      // 경로는 환경 변수로 넘긴다 (스크립트는 ASCII 만)
       const ps = [
         "$ErrorActionPreference='Stop'",
         '$running = @(Get-Process WINWORD -ErrorAction SilentlyContinue).Count -gt 0',
@@ -627,9 +636,9 @@ ipcMain.handle('doc:convert', async (_e, data: Uint8Array) => {
         '$prevSec = $w.AutomationSecurity',
         '$w.AutomationSecurity = 3',
         'try { $w.Options.UpdateLinksAtOpen = $false } catch {}',
-        `try { $d = $w.Documents.Open(${q(src)}, $false, $true, $false); $d.SaveAs2(${q(dst)}, 16); $d.Close($false) } finally { $w.AutomationSecurity = $prevSec; if (-not $running -and $w.Documents.Count -eq 0) { $w.Quit() } }`,
+        'try { $d = $w.Documents.Open($env:KITE_DOC_SRC, $false, $true, $false); $d.SaveAs2($env:KITE_DOC_DST, 16); $d.Close($false) } finally { $w.AutomationSecurity = $prevSec; if (-not $running -and $w.Documents.Count -eq 0) { $w.Quit() } }',
       ].join('; ');
-      const { ok } = await runPowerShell(ps, { timeout: 60000 });
+      const { ok } = await runPowerShell(`try { ${ps} } catch { exit 1 }`, { timeout: 60000, env: { KITE_DOC_SRC: src, KITE_DOC_DST: dst } });
       if (ok && fs.existsSync(dst)) {
         const buf = await fs.promises.readFile(dst);
         return { kind: 'docx', data: new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength) };

@@ -157,7 +157,7 @@ const MENUS: { label: string; key: string; items: () => MenuEntry[] }[] = [
   {
     label: '도구(K)',
     key: 'k',
-    items: () => ['tools.palette', '-', 'tools.ai', 'tools.mcp', 'tools.collab', '-', 'tools.check', 'tools.privacy', 'tools.spell', 'tools.wordCount', '-', 'tools.overwrite', '-', 'tools.prefs', 'tools.shortcuts', '-', 'tools.about'],
+    items: () => ['tools.palette', '-', 'tools.ai', 'tools.mcp', 'tools.collab', '-', 'tools.check', 'tools.privacy', 'tools.spell', 'tools.wordCount', '-', 'tools.overwrite', '-', 'tools.prefs', 'tools.shortcuts', '-', 'tools.privacyPolicy', 'tools.licenses', 'tools.about'],
   },
 ];
 

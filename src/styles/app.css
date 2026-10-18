@@ -2549,3 +2549,40 @@ input[type='number'] {
 :root[data-theme='dark'] .doc-tab:not(.active) {
   background: transparent;
 }
+
+/* AI 안내·신고 */
+.ai-disclaimer {
+  font-size: 11px;
+  color: var(--c-text-dim);
+  padding: 4px 10px 0;
+}
+.ai-actions .ai-report {
+  color: var(--c-text-dim);
+}
+
+/* 개인정보 처리방침·라이선스 창 */
+.legal-md {
+  max-height: 60vh;
+  overflow: auto;
+  line-height: 1.65;
+  font-size: 13px;
+}
+.legal-md table {
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.legal-md th,
+.legal-md td {
+  border: 1px solid var(--c-border);
+  padding: 4px 6px;
+  vertical-align: top;
+}
+.legal-txt {
+  max-height: 60vh;
+  overflow: auto;
+  font-size: 11px;
+  white-space: pre-wrap;
+  background: var(--c-surface-2);
+  padding: 8px;
+  border-radius: 6px;
+}

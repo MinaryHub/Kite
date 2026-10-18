@@ -10,13 +10,14 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:web": "vite",
-    "build": "tsc --noEmit && vite build && node scripts/build-electron.mjs",
+    "build": "node scripts/gen-notices.mjs && tsc --noEmit && vite build && node scripts/build-electron.mjs",
     "start": "node scripts/start.mjs",
     "typecheck": "tsc --noEmit",
     "dist": "node scripts/bump-version.mjs && npm run build && electron-builder --win",
     "dist:same": "npm run build && electron-builder --win",
     "version:minor": "node scripts/bump-version.mjs minor",
-    "version:major": "node scripts/bump-version.mjs major"
+    "version:major": "node scripts/bump-version.mjs major",
+    "dist:store": "npm run build && electron-builder --win appx"
   },
   "build": {
     "appId": "kr.smic.kite",
@@ -54,7 +55,25 @@
       "shortcutName": "Kite",
       "allowToChangeInstallationDirectory": true
     },
-    "electronDist": "node_modules/electron/dist"
+    "electronDist": "node_modules/electron/dist",
+    "appx": {
+      "identityName": "PARTNER_CENTER_IDENTITY_NAME",
+      "publisher": "CN=PARTNER-CENTER-PUBLISHER-ID",
+      "publisherDisplayName": "SMIC",
+      "displayName": "Kite 워드프로세서",
+      "applicationId": "Kite",
+      "languages": [
+        "ko-KR",
+        "en-US"
+      ],
+      "backgroundColor": "#1F3A68",
+      "capabilities": [
+        "internetClient",
+        "privateNetworkClientServer"
+      ],
+      "customManifestPath": "appx/appxmanifest.xml",
+      "customExtensionsPath": "build/appx/extensions.xml"
+    }
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.134.0",

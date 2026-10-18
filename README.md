@@ -72,6 +72,28 @@ HWP·HWPX 저장 결과는 한글 2018에서 실제로 열어 확인했습니다
 
 단축키 전체 목록은 프로그램의 **도구 → 단축키 목록(Shift+F1)** 에 있습니다.
 
+## Microsoft Store 배포
+
+```
+npm run dist:store      # 윈도우에서 실행 → release/*.appx (MSIX)
+```
+
+제출 전에 채울 값:
+
+- `package.json` → `build.appx` 의 `identityName`, `publisher`, `publisherDisplayName`: Partner Center 의 "제품 ID" 화면 값으로 바꾼다
+- `src/appInfo.ts` → `SUPPORT_EMAIL`(AI 응답 신고·문의 주소), `PRIVACY_URL`(아래 처리방침을 올린 웹 주소)
+- `PRIVACY.md` 의 문의처. 이 내용을 웹에 올리고 그 주소를 Partner Center 의 개인정보 처리방침 칸에도 넣는다
+
+스토어판에서 달라지는 점 (MSIX 로 설치되면 자동, 시험할 때는 `KITE_STORE=1`):
+
+- 한컴오피스 전용 글꼴 읽기를 끈다 (한컴오피스용 글꼴의 라이선스 문제)
+- Claude 데스크톱 등록은 설정 파일에 직접 쓰지 않고, 넣을 내용을 복사해 설정 파일을 열어 준다 (MSIX 의 AppData 쓰기 가상화)
+- AI 앱이 Kite 를 실행할 때는 실행 별칭 `kite-word.exe` 를 쓴다 (`build/appx/extensions.xml`)
+
+모든 판에 공통으로, 클라우드 AI 로 처음 보낼 때 동의를 받고, AI 응답마다 신고 단추가 있으며, 도구 메뉴에서 개인정보 처리방침과 오픈소스 라이선스(`npm run build` 때 `scripts/gen-notices.mjs` 가 만든다)를 볼 수 있다.
+
+본 제품은 한글과컴퓨터의 한/글 문서 파일(.hwp) 공개 문서를 참고하여 개발하였습니다.
+
 ## 구조
 
 ```

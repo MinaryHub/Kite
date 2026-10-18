@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -8,6 +8,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { MCP_TOOL_NAMES, MCP_TOOLS, type McpCall, type McpResult } from '../src/mcp/tools';
+import { STORE_BUILD, STORE_EXEC_ALIAS } from './flags';
 
 /**
  * AI 앱 연결 (MCP)
@@ -407,6 +408,8 @@ export function initMcpHost(win: () => BrowserWindow | null) {
 // =====================================================================
 /** AI 앱 설정에 넣을 실행 명령 */
 function bridgeCommand(): { command: string; args: string[] } {
+  // 스토어판(MSIX)은 설치 폴더(WindowsApps)의 exe 를 다른 앱이 직접 실행할 수 없으므로 실행 별칭을 쓴다
+  if (STORE_BUILD && process.env.LOCALAPPDATA) return { command: path.join(process.env.LOCALAPPDATA, 'Microsoft', 'WindowsApps', STORE_EXEC_ALIAS), args: ['--mcp'] };
   if (app.isPackaged) return { command: process.execPath, args: ['--mcp'] };
   return { command: process.execPath, args: [app.getAppPath(), '--mcp'] };
 }
@@ -448,6 +451,20 @@ function registerClaudeDesktop(): { ok: boolean; message: string } {
   if (!conf || typeof conf !== 'object' || Array.isArray(conf)) conf = {};
   if (!conf.mcpServers || typeof conf.mcpServers !== 'object') conf.mcpServers = {};
   conf.mcpServers.kite = bridgeCommand();
+  if (STORE_BUILD) {
+    // 스토어판(MSIX)이 AppData 에 쓰면 앱 전용 사본으로 돌려져 Claude 가 보지 못할 수 있다.
+    // 대신 넣을 내용을 복사해 두고 설정 파일을 사용자의 편집기로 열어, 사용자가 직접 붙여 넣게 한다.
+    const snippet = JSON.stringify({ mcpServers: { kite: conf.mcpServers.kite } }, null, 2);
+    clipboard.writeText(snippet);
+    if (fs.existsSync(file)) void shell.openPath(file);
+    else void shell.openPath(path.dirname(file));
+    return {
+      ok: true,
+      message:
+        '넣을 내용을 클립보드에 복사하고 Claude 데스크톱 설정 파일을 열었습니다.\n' +
+        '파일의 "mcpServers" 안에 "kite" 항목을 붙여 넣고 저장한 뒤 Claude 데스크톱을 다시 실행하세요. (파일이 비어 있으면 복사한 내용을 그대로 붙여 넣으면 됩니다)',
+    };
+  }
   try {
     fs.writeFileSync(file, JSON.stringify(conf, null, 2));
   } catch (e: any) {

@@ -5,6 +5,8 @@
 
 export type AiProvider = 'claude' | 'openai' | 'gemini' | 'ollama';
 
+import { ensureAiConsent } from './consent';
+
 const LS = 'kite:ai:';
 const lsGet = (k: string, d: string) => {
   try {
@@ -44,6 +46,7 @@ export async function aiComplete(system: string, user: string, opts: { signal?: 
     const keys = await api.aiKeyStatus();
     if (!keys || keys[provider] === 'none') throw new Error('AI API 키가 없습니다. AI 도우미(도구 → AI 도우미)의 설정에서 키를 넣어 주세요.');
   }
+  if (!(await ensureAiConsent(provider))) throw new Error('AI로 보내지 않았습니다 (동의하지 않음).');
   const id = `once-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   let text = '';
   return new Promise<string>((resolve, reject) => {
