@@ -24,6 +24,8 @@ if (process.argv.includes('--build')) {
   // 설정을 객체로 넘기면 package.json 의 build 와 합쳐져 electronDist 가 되살아나므로, 임시 설정 파일 경로로 넘긴다
   const config = { ...pkg.build };
   delete config.electronDist;
+  // 네이티브 모듈이 없으므로 재설치를 끈다 (켜 두면 node_modules/electron/dist 가 윈도우용으로 바뀌거나 지워져 맥 빌드가 깨진다)
+  config.npmRebuild = false;
   const tmp = path.join(root, 'release', '.msix-builder.json');
   fs.mkdirSync(path.dirname(tmp), { recursive: true });
   fs.writeFileSync(tmp, JSON.stringify(config));

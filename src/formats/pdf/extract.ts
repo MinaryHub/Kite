@@ -269,6 +269,31 @@ export function extractPage(ops: { fnArray: number[]; argsArray: any[] }, OPS: R
       } else break;
     }
     const lw = Math.max(0.1, st.lineWidth * scaleOf(m));
+    // 테두리 고리: 바깥 사각형 안에 안쪽 사각형을 겹쳐 칠한 경로 (WeasyPrint 등은 상자 테두리를 이렇게 그린다).
+    // 짝홀 규칙이든 반대 방향 감기든 실제로 칠해지는 곳은 두 사각형 사이의 띠뿐이므로, 네 변의 띠로 옮긴다
+    // (꽉 찬 사각형 두 개로 보면 상자 전체가 검게 칠해진다)
+    if (isFill && !isStroke && subs.length === 2 && st.fill !== 'transparent' && st.fillAlpha > 0.15) {
+      const box = (sp: (typeof subs)[number]) => {
+        if (sp.curve || sp.pts.length < 4 || sp.pts.length > 5) return null;
+        const xs = sp.pts.map((p) => p[0]);
+        const ys = sp.pts.map((p) => p[1]);
+        const b = { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+        return sp.pts.every((p) => (Math.abs(p[0] - b.x0) < 0.3 || Math.abs(p[0] - b.x1) < 0.3) && (Math.abs(p[1] - b.y0) < 0.3 || Math.abs(p[1] - b.y1) < 0.3)) ? b : null;
+      };
+      let o = box(subs[0]);
+      let i = box(subs[1]);
+      if (o && i && i.x0 - o.x0 < 0 && i.y0 - o.y0 < 0) [o, i] = [i, o];
+      if (o && i && i.x0 >= o.x0 - 0.05 && i.y0 >= o.y0 - 0.05 && i.x1 <= o.x1 + 0.05 && i.y1 <= o.y1 + 0.05 && (i.x1 - i.x0) * (i.y1 - i.y0) < (o.x1 - o.x0) * (o.y1 - o.y0) * 0.999) {
+        const band = (x0: number, y0: number, x1: number, y1: number) => {
+          if (x1 - x0 > 0.05 && y1 - y0 > 0.05) addFillRect({ x0, y0, x1, y1 }, st.fill);
+        };
+        band(o.x0, o.y0, o.x1, i.y0); // 위
+        band(o.x0, i.y1, o.x1, o.y1); // 아래
+        band(o.x0, i.y0, i.x0, i.y1); // 왼쪽
+        band(i.x1, i.y0, o.x1, i.y1); // 오른쪽
+        return;
+      }
+    }
     for (const s of subs) {
       if (s.pts.length < 2) continue;
       const xs = s.pts.map((p) => p[0]);

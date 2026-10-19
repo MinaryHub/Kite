@@ -1133,6 +1133,15 @@ export function analyzePage(pc: PageContent) {
     floatImages(c);
     splitColumns(c);
   }
+  // 표 옆 글: 칸·상자 안의 작은 표(그림 상자 속 배열 등)까지
+  const sideText = (c: Container) => {
+    floatTables(c);
+    for (const ch of c.children) {
+      if (ch.type === 'table') ch.cells.forEach(sideText);
+      else sideText(ch.inner);
+    }
+  };
+  sideText(pageC);
   // 빈 표(글자·그림 없는 장식 테두리)는 버린다
   const hasContent = (c: Container): boolean => c.glyphs.length > 0 || c.images.length > 0 || !!c.bgImage || !!(c as CellModel).overlays?.length || c.children.some((ch) => (ch.type === 'table' ? ch.cells.some(hasContent) : hasContent(ch.inner)));
   const prune = (c: Container) => {
@@ -1147,52 +1156,117 @@ export function analyzePage(pc: PageContent) {
 }
 
 /**
- * 긴 세로 구분선(시험지·신문처럼 두 단 사이의 선)으로 나뉜 구간을 테두리 없는 2칸 표로 만든다.
- * 선의 세로 범위 안에 있는 글자·그림·표를 선의 왼쪽/오른쪽 칸으로 옮기고, 선은 왼쪽 칸의 오른쪽 테두리로 그린다.
+ * 긴 세로 구분선(시험지·신문처럼 단 사이의 선)으로 나뉜 구간을 테두리 없는 표로 만든다 (선 N개 → N+1칸).
+ * 세로 범위가 겹치는 구분선들은 한 표로 묶는다: 선마다 따로 나누면 첫 선에서 글자를 모두 옮긴 뒤라
+ * 다음 선(3단의 둘째 선 등)이 무시되어 둘째·셋째 단이 한 칸에 합쳐진다.
+ * 선의 세로 범위 안에 있는 글자·그림·표를 칸으로 옮기고, 선은 왼쪽 칸의 오른쪽 테두리로 그린다.
  */
 function columnsByRule(pageC: Container, leftover: Seg[]): CellModel[] {
   const H = pageC.y1 - pageC.y0;
   const out: CellModel[] = [];
-  const rules = leftover.filter((s) => s.dir === 'v' && s.b - s.a > H * 0.3).sort((a, b) => a.pos - b.pos);
-  for (const r of rules) {
-    const inBand = (y0: number, y1: number) => y0 >= r.a - 4 && y1 <= r.b + 4;
+  const all = leftover.filter((s) => s.dir === 'v' && s.b - s.a > H * 0.3).sort((a, b) => a.pos - b.pos);
+  // 세로 범위가 절반 넘게 겹치는 선끼리 묶는다
+  const groups: Seg[][] = [];
+  for (const r of all) {
+    const g = groups.find((gr) => gr.every((q) => overlap(q.a, q.b, r.a, r.b) > Math.min(q.b - q.a, r.b - r.a) * 0.5 && Math.abs(q.pos - r.pos) > 20));
+    if (g) g.push(r);
+    else groups.push([r]);
+  }
+  for (const group0 of groups) {
+    const a = Math.min(...group0.map((r) => r.a));
+    const b = Math.max(...group0.map((r) => r.b));
+    const inBand = (y0: number, y1: number) => y0 >= a - 4 && y1 <= b + 4;
     const gs = pageC.glyphs.filter((g) => inBand(g.y - g.size, g.y));
-    const leftN = gs.filter((g) => g.x + g.w <= r.pos).length;
-    const rightN = gs.filter((g) => g.x >= r.pos).length;
-    // 양쪽에 글이 있고, 선을 가로지르는 글자가 거의 없어야 단 구분선
-    if (leftN < 20 || rightN < 20 || gs.length - leftN - rightN > gs.length * 0.02) continue;
+    // 단 구분선인지: 양쪽 이웃 구간에 글이 있고, 선을 가로지르는 글자가 거의 없어야 한다
+    const group = group0.slice().sort((p, q) => p.pos - q.pos);
+    const ok = group.filter((r, k) => {
+      const lo = k > 0 ? group[k - 1].pos : -Infinity;
+      const hi = k < group.length - 1 ? group[k + 1].pos : Infinity;
+      const leftN = gs.filter((g) => g.x + g.w <= r.pos && g.x >= lo).length;
+      const rightN = gs.filter((g) => g.x >= r.pos && g.x + g.w <= hi).length;
+      const cross = gs.filter((g) => g.x < r.pos && g.x + g.w > r.pos).length;
+      return leftN >= 20 && rightN >= 20 && cross <= gs.length * 0.02;
+    });
+    if (!ok.length) continue;
     const xs0 = Math.min(...gs.map((g) => g.x), ...pageC.images.filter((im) => inBand(im.y0, im.y1)).map((im) => im.x0), ...pageC.children.filter((ch) => inBand(ch.y0, ch.y1)).map((ch) => ch.x0));
     const xs1 = Math.max(...gs.map((g) => g.x + g.w), ...pageC.images.filter((im) => inBand(im.y0, im.y1)).map((im) => im.x1), ...pageC.children.filter((ch) => inBand(ch.y0, ch.y1)).map((ch) => ch.x1));
-    const y0 = r.a;
-    const y1 = r.b;
-    const side: BorderSide = { w: round(Math.max(0.1, Math.min(5, (r.w * 25.4) / 72)), 2), c: normHex(r.color), s: r.style || 'solid' };
-    const mk = (cx0: number, cx1: number, col: number): CellModel => ({ kind: 'cell', row: 0, col, rs: 1, cs: 1, x0: cx0, x1: cx1, y0, y1, bg: null, glyphs: [], images: [], children: [], padL: 0, padR: 0, borders: col === 0 ? { r: side } : {}, layout: true });
-    const left = mk(Math.min(xs0 - 1, r.pos - 10), r.pos, 0);
-    const right = mk(r.pos, Math.max(xs1 + 1, r.pos + 10), 1);
+    const y0 = a;
+    const y1 = b;
+    const sideOf = (r: Seg): BorderSide => ({ w: round(Math.max(0.1, Math.min(5, (r.w * 25.4) / 72)), 2), c: normHex(r.color), s: r.style || 'solid' });
+    const edges = [Math.min(xs0 - 1, ok[0].pos - 10), ...ok.map((r) => r.pos), Math.max(xs1 + 1, ok[ok.length - 1].pos + 10)];
+    const cells: CellModel[] = [];
+    for (let k = 0; k < edges.length - 1; k++) {
+      cells.push({ kind: 'cell', row: 0, col: k, rs: 1, cs: 1, x0: edges[k], x1: edges[k + 1], y0, y1, bg: null, glyphs: [], images: [], children: [], padL: 0, padR: 0, borders: k < ok.length ? { r: sideOf(ok[k]) } : {}, layout: true });
+    }
+    const cellAt = (x: number) => cells[Math.max(0, ok.findIndex((r) => x < r.pos) === -1 ? cells.length - 1 : ok.findIndex((r) => x < r.pos))];
     pageC.glyphs = pageC.glyphs.filter((g) => {
       if (!inBand(g.y - g.size, g.y)) return true;
-      (g.x + g.w / 2 < r.pos ? left : right).glyphs.push(g);
+      cellAt(g.x + g.w / 2).glyphs.push(g);
       return false;
     });
     pageC.images = pageC.images.filter((im) => {
       if (!inBand(im.y0, im.y1)) return true;
-      ((im.x0 + im.x1) / 2 < r.pos ? left : right).images.push(im);
+      cellAt((im.x0 + im.x1) / 2).images.push(im);
       return false;
     });
     pageC.children = pageC.children.filter((ch) => {
       if (!inBand(ch.y0, ch.y1)) return true;
-      ((ch.x0 + ch.x1) / 2 < r.pos ? left : right).children.push(ch);
+      cellAt((ch.x0 + ch.x1) / 2).children.push(ch);
       return false;
     });
     pageC.rules = (pageC.rules || []).filter((rl) => {
       if (!inBand(rl.pos, rl.pos)) return true;
-      ((rl.a + rl.b) / 2 < r.pos ? left : right).rules = [...(((rl.a + rl.b) / 2 < r.pos ? left : right).rules || []), rl];
+      const c = cellAt((rl.a + rl.b) / 2);
+      c.rules = [...(c.rules || []), rl];
       return false;
     });
-    pageC.children.push({ type: 'table', x0: left.x0, x1: right.x1, y0, y1, xs: [left.x0, r.pos, right.x1], ys: [y0, y1], cells: [left, right] });
-    out.push(left, right);
+    pageC.children.push({ type: 'table', x0: cells[0].x0, x1: cells[cells.length - 1].x1, y0, y1, xs: edges, ys: [y0, y1], cells });
+    out.push(...cells);
   }
   return out;
+}
+
+/**
+ * 작은 표 옆에 붙은 글(배열 그림의 행 이름·설명 등)을 표와 나란히 둔다: [왼쪽 글 | 표 | 오른쪽 글] 테두리 없는 표.
+ * 편집기에는 표 옆에 글을 흘리는 기능이 없어서, 그대로 두면 그 글이 표 아래로 떨어져 단이 길어진다.
+ */
+function floatTables(c: Container) {
+  const W = c.x1 - c.x0;
+  for (const t of c.children.slice()) {
+    if (t.type !== 'table' || t.cells.some((cl) => cl.layout) || t.x1 - t.x0 > W * 0.8) continue;
+    const inBand = (g: Glyph) => {
+      const cy = g.y - g.size * 0.35;
+      return cy >= t.y0 - 1 && cy <= t.y1 + 1;
+    };
+    const band = c.glyphs.filter(inBand);
+    if (!band.length) continue;
+    const left = band.filter((g) => g.x + g.w <= t.x0 + 1);
+    const right = band.filter((g) => g.x >= t.x1 - 1);
+    // 표와 겹치는 글(표 위 글씨)이 있으면 손대지 않는다
+    if (left.length + right.length < band.length || (!left.length && !right.length)) continue;
+    const y0 = Math.min(t.y0, ...band.map((g) => g.y - g.size * 1.1));
+    const y1 = Math.max(t.y1, ...band.map((g) => g.y + g.size * 0.3));
+    const mk = (cx0: number, cx1: number, col: number): CellModel => ({ kind: 'cell', row: 0, col, rs: 1, cs: 1, x0: cx0, x1: cx1, y0, y1, bg: null, glyphs: [], images: [], children: [], padL: 0, padR: 0, borders: {}, layout: true });
+    const cells: CellModel[] = [];
+    if (left.length) {
+      const lc = mk(Math.min(...left.map((g) => g.x)) - 1, t.x0 - 0.5, 0);
+      lc.glyphs.push(...left);
+      cells.push(lc);
+    }
+    const mid = mk(t.x0 - 0.5, t.x1 + 0.5, cells.length);
+    mid.children.push(t);
+    cells.push(mid);
+    if (right.length) {
+      const rc = mk(t.x1 + 0.5, Math.max(...right.map((g) => g.x + g.w)) + 1, cells.length);
+      rc.glyphs.push(...right);
+      cells.push(rc);
+    }
+    if (cells.some((cl) => cl.x1 - cl.x0 < 3)) continue;
+    const moved = new Set([...left, ...right]);
+    c.glyphs = c.glyphs.filter((g) => !moved.has(g));
+    c.children = c.children.filter((ch) => ch !== t);
+    c.children.push({ type: 'table', x0: cells[0].x0, x1: cells[cells.length - 1].x1, y0, y1, xs: [...cells.map((cl) => cl.x0), cells[cells.length - 1].x1], ys: [y0, y1], cells });
+  }
 }
 
 /** y 아래에서 처음 나오는 내용(표·상자·그림·글줄)의 위끝 */

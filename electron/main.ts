@@ -149,6 +149,22 @@ if (MCP_BRIDGE) {
 
 if (!MCP_BRIDGE) pendingFiles.push(...filesFromArgv(process.argv));
 
+// macOS: Finder 에서 두 번 누르거나 '다음으로 열기'·open 명령으로 넘긴 파일은 명령줄이 아니라 open-file 이벤트로 온다
+// (앱이 준비되기 전에도 올 수 있으므로 일찍 등록한다)
+let initialFilesTaken = false;
+if (!MCP_BRIDGE) {
+  app.on('open-file', (e, p) => {
+    e.preventDefault();
+    const files = filesFromArgv(['', p]);
+    if (!files.length) return;
+    if (mainWindow && initialFilesTaken) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+      mainWindow.webContents.send('app:open-files', files);
+    } else pendingFiles.push(...files);
+  });
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -317,6 +333,7 @@ ipcMain.on('file:dropped', (_e, p: unknown) => {
 const userData = () => app.getPath('userData');
 
 ipcMain.handle('app:initial-files', () => {
+  initialFilesTaken = true;
   const f = [...pendingFiles];
   pendingFiles.length = 0;
   return f;
