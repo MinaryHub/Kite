@@ -73,6 +73,7 @@ export async function convertPdf(pdf: any, OPS: Record<string, number>, imageSrc
       const ops = await page.getOperatorList();
       pc = extractPage(ops, OPS, (id) => fontOf(page, id), vp);
       collectEmbeddedFonts(page, pc, embedded);
+      await keepPageImages(page, pc.images);
     } catch {
       warnings.push(`${pi}쪽 내용을 읽지 못했습니다.`);
       pc = { width: vp.width, height: vp.height, glyphs: [], fills: [], segs: [], images: [] };
@@ -134,9 +135,9 @@ export async function convertPdf(pdf: any, OPS: Record<string, number>, imageSrc
     pg.marginRight = clampMm(ptmm(pageW - right) - 0.5, 0, maxMm);
     pg.marginTop = clampMm(ptmm(top) - 1, 0, maxMm);
     // 쪽마다 쪽 나누기가 있으므로 아래 여백을 줄여도 다음 쪽 내용이 올라오지 않는다 — 넘침만 막는다.
-    // (쪽 번호가 있으면 그 자리를 위해 조금만 줄인다)
+    // (쪽 번호가 있으면 그 자리를 위해 조금만 줄인다. 표·상자의 선·안 여백으로 생기는 작은 누적 오차로 넘치지 않게 6mm 여유)
     const bottomMm = ptmm(pageH - bottom);
-    pg.marginBottom = settings.pageNumber.pos !== 'none' ? clampMm(bottomMm - 3, 0, maxMm) : clampMm(Math.min(bottomMm - 1.5, 10), 0, maxMm);
+    pg.marginBottom = settings.pageNumber.pos !== 'none' ? clampMm(bottomMm - 6, 0, maxMm) : clampMm(Math.min(bottomMm - 3, 10), 0, maxMm);
   } else {
     pg.marginLeft = clampMm(ptmm(left) - 0.5);
     pg.marginRight = clampMm(ptmm(pageW - right) - 0.5);
@@ -191,6 +192,8 @@ export async function convertPdf(pdf: any, OPS: Record<string, number>, imageSrc
     }
     if (i > 0) blocks.push({ type: 'pageBreak' });
     blocks.push(...res.blocks);
+    // 그림 읽기가 다 끝난 뒤에 쪽 자원을 푼다 (먼저 풀면 아직 못 읽은 그림이 빈 그림이 된다)
+    await Promise.allSettled([...srcCache.values()]);
     page.cleanup?.();
   }
   if (imgCount === 0 && pages.every((p) => !p.pc.glyphs.length)) warnings.push('텍스트가 없는 PDF입니다 (스캔 이미지일 수 있음).');
@@ -369,8 +372,32 @@ function renderPage(page: any, mode: 'all' | 'images' | 'vectors' | { single: nu
   return p;
 }
 
+/** 쪽마다 미리 읽어 둔 그림 (그림 이름 → data URL) */
+const keptImages = new WeakMap<any, Map<string, string>>();
+
+/**
+ * 그리기 목록을 얻은 직후, 어떤 렌더·정리보다 먼저 그 쪽의 그림을 읽어 둔다. pdf.js 는 쪽을 정리할 때
+ * (렌더가 끝나며 미뤄 둔 정리가 돌 때도) 그림 bitmap 을 닫으므로, 나중에 읽으면 빈 그림이 될 수 있다.
+ */
+async function keepPageImages(page: any, images: PdfImage[]) {
+  if (typeof document === 'undefined') return;
+  const kept = new Map<string, string>();
+  for (const im of images) {
+    if (typeof im.ref !== 'string' || im.ref === VECTOR_REF || kept.has(im.ref)) continue;
+    try {
+      const url = imageToDataUrl(await getObj(page, im.ref));
+      if (url && url.length > 100) kept.set(im.ref, url);
+    } catch {
+      /* 나중에 다시 */
+    }
+  }
+  keptImages.set(page, kept);
+}
+
 async function loadImage(page: any, img: PdfImage): Promise<string | null> {
   if (img.ref === VECTOR_REF) return cropRender(page, img, 'vectors');
+  const kept = typeof img.ref === 'string' ? keptImages.get(page)?.get(img.ref) : null;
+  if (kept) return kept;
   try {
     const obj = typeof img.ref === 'string' ? await getObj(page, img.ref) : img.ref;
     const url = imageToDataUrl(obj);
@@ -431,7 +458,14 @@ function imageToDataUrl(img: any): string | null {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
-  if (img.bitmap) {
+  if (typeof VideoFrame !== 'undefined' && img.bitmap instanceof VideoFrame) {
+    // pdf.js 는 JPEG 를 VideoFrame 으로 풀어 둔다 (한 번 그리면 닫으므로 그 전에 읽어야 한다)
+    const f = img.bitmap as VideoFrame;
+    if (!f.displayWidth || !f.displayHeight) return null;
+    canvas.width = f.displayWidth;
+    canvas.height = f.displayHeight;
+    ctx.drawImage(f, 0, 0);
+  } else if (img.bitmap) {
     canvas.width = img.bitmap.width;
     canvas.height = img.bitmap.height;
     ctx.drawImage(img.bitmap, 0, 0);

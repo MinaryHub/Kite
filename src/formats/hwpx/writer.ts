@@ -1,7 +1,7 @@
 import JSZip from 'jszip';
-import type { KDocument } from '../../types';
-import { type JNode, mmToHwp, pxToHwp, ptToHwp, xmlEscape, parseBorderCss, normColor, safeIsoDate } from '../common';
-import { type CharStyle, type FlatBlock, type FlatPara, type FlatTable, type ParaStyle, charKey, defaultChar, defaultPara, flattenDoc, paraKey, type FlatBox } from '../flatten';
+import type { HeaderFooter, KDocument } from '../../types';
+import { type JNode, mmToHwp, pxToHwp, ptToHwp, xmlEscape, parseBorderCss, normColor, safeIsoDate, FIXED_SPACE } from '../common';
+import { type CharStyle, type FlatBlock, type FlatPara, type FlatTable, type ParaStyle, charKey, langFontIds, defaultChar, defaultPara, flattenDoc, paraKey, type FlatBox } from '../flatten';
 import { prepareImage } from '../imageUtil';
 
 /**
@@ -62,7 +62,7 @@ class Registry {
       id = this.chars.length;
       this.chars.push(c);
       this.charIds.set(k, id);
-      this.font(c.font);
+      langFontIds(c, (n) => this.font(n));
     }
     return id;
   }
@@ -104,6 +104,8 @@ class SectionWriter {
   out: string[] = [];
   footnoteNo = 0;
   zOrder = 0;
+  /** 머리말/꼬리말을 쓰는 중 ({{PAGE}} → 쪽 번호 필드) */
+  inHF = false;
   constructor(
     private reg: Registry,
     private doc: KDocument,
@@ -180,7 +182,17 @@ class SectionWriter {
         const tabXml = `<hp:tab width="${tb?.width ? pxToHwp(tb.width) : 4000}" leader="${tb?.leader || 0}" type="${tb ? tb.type : 1}"/>`;
         parts.forEach((part, i) => {
           if (i) xml += tabXml;
-          if (part) xml += xmlEscape(part);
+          // 고정폭 빈칸 (읽을 때 U+2005 로 바꾼 것)
+          if (!part) return;
+          const pageParts = this.inHF ? part.split('{{PAGE}}') : [part];
+          pageParts.forEach((pp, k) => {
+            if (k) {
+              closeT();
+              xml += PAGE_NUM_CTRL;
+              openT();
+            }
+            if (pp) xml += xmlEscape(pp).split(String.fromCharCode(FIXED_SPACE)).join('<hp:fwSpace/>');
+          });
         });
       } else if (it.type === 'break') {
         if (!open) ensureRun(this.reg.char(p.baseChar), null);
@@ -266,20 +278,22 @@ class SectionWriter {
     return `<hp:ctrl><hp:footNote number="${n}" suffixChar="41" instId="${nextId()}">${this.subList(inner)}</hp:footNote></hp:ctrl>`;
   }
 
-  table(t: FlatTable, sub: boolean): string {
+  table(t: FlatTable, sub: boolean, first = false): string {
     const totalPx = t.colWidthsPx.reduce((a, b) => a + b, 0) || 1;
     const scale = Math.min(1, this.bodyWidthHwp / pxToHwp(totalPx));
     const colW = t.colWidthsPx.map((w) => Math.round(pxToHwp(w) * scale));
     const tableW = colW.reduce((a, b) => a + b, 0);
     // 줄 높이: 지정된 줄은 그 높이, 아니면 최소값 (한글은 셀 높이를 최소 높이로 쓴다)
-    const rowHs = Array.from({ length: t.rows }, (_, i) => (t.rowHeightsPx?.[i] ? Math.max(1000, pxToHwp(t.rowHeightsPx[i]!) + 282) : 1000));
+    const rowHs = Array.from({ length: t.rows }, (_, i) => (t.rowHeightsPx?.[i] ? Math.max(283, pxToHwp(t.rowHeightsPx[i]!) + 282) : 1000));
     const spanH = (r: number, n: number) => rowHs.slice(r, r + n).reduce((a, b) => a + b, 0);
     const id = nextId();
     let xml = `<hp:tbl id="${id}" zOrder="${this.zOrder++}" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="CELL" repeatHeader="1" rowCnt="${t.rows}" colCnt="${t.cols}" cellSpacing="0" borderFillIDRef="3" noAdjust="0">`;
     xml += `<hp:sz width="${tableW}" widthRelTo="ABSOLUTE" height="${spanH(0, t.rows)}" heightRelTo="ABSOLUTE" protect="0"/>`;
-    xml += `<hp:pos treatAsChar="0" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="${t.align === 'center' ? 'CENTER' : t.align === 'right' ? 'RIGHT' : 'LEFT'}" vertOffset="0" horzOffset="0"/>`;
+    xml += `<hp:pos treatAsChar="${t.inline ? 1 : 0}" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="${t.align === 'center' ? 'CENTER' : t.align === 'right' ? 'RIGHT' : 'LEFT'}" vertOffset="0" horzOffset="0"/>`;
     const pad = pxToHwp(t.cellPadPx);
-    xml += `<hp:outMargin left="140" right="140" top="140" bottom="140"/><hp:inMargin left="${pad}" right="${pad}" top="141" bottom="141"/>`;
+    // 바깥 여백: 한글에서 읽은 표는 그 값, Kite 에서 만든 표는 화면과 같이 0 (HWP 와 같은 기본값)
+    const om = t.outMarginPx ? t.outMarginPx.map((v) => pxToHwp(v)) : [0, 0, 0, 0];
+    xml += `<hp:outMargin left="${om[0]}" right="${om[1]}" top="${om[2]}" bottom="${om[3]}"/><hp:inMargin left="${pad}" right="${pad}" top="141" bottom="141"/>`;
     for (const row of t.cells) {
       xml += '<hp:tr>';
       for (const cell of row) {
@@ -287,18 +301,22 @@ class SectionWriter {
         const w = colW.slice(cell.col, cell.col + cell.colspan).reduce((a, b) => a + b, 0);
         const inner = this.blocks(cell.blocks, true) || `<hp:p id="2147483648" paraPrIDRef="0" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="0"/></hp:p>`;
         const va = cell.vAlign === 'top' ? 'TOP' : cell.vAlign === 'bottom' ? 'BOTTOM' : 'CENTER';
-        xml += `<hp:tc name="" header="${cell.header ? 1 : 0}" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="${bf}">`;
+        xml += `<hp:tc name="" header="${cell.header ? 1 : 0}" hasMargin="${cell.marginsPx ? 1 : 0}" protect="0" editable="0" dirty="0" borderFillIDRef="${bf}">`;
         xml += this.subList(inner, va);
         xml += `<hp:cellAddr colAddr="${cell.col}" rowAddr="${cell.row}"/><hp:cellSpan colSpan="${cell.colspan}" rowSpan="${cell.rowspan}"/>`;
-        xml += `<hp:cellSz width="${w}" height="${spanH(cell.row, cell.rowspan)}"/><hp:cellMargin left="${pad}" right="${pad}" top="141" bottom="141"/></hp:tc>`;
+        xml += `<hp:cellSz width="${w}" height="${spanH(cell.row, cell.rowspan)}"/>${cell.marginsPx ? `<hp:cellMargin left="${pxToHwp(cell.marginsPx[0])}" right="${pxToHwp(cell.marginsPx[1])}" top="${pxToHwp(cell.marginsPx[2])}" bottom="${pxToHwp(cell.marginsPx[3])}"/>` : `<hp:cellMargin left="${pad}" right="${pad}" top="141" bottom="141"/>`}</hp:tc>`;
       }
       xml += '</hp:tr>';
     }
     xml += '</hp:tbl>';
     const pp = defaultPara();
+    // 글자처럼 놓인 표의 줄: 줄 간격이 160% 면 표 아래에 글자 크기의 60% 만큼 빈자리가 더 생긴다
+    if (t.inline) pp.lineHeight = '1';
     const paraId = this.reg.para(pp);
     const pid = sub ? '2147483648' : '0';
-    return `<hp:p id="${pid}" paraPrIDRef="${paraId}" styleIDRef="0" pageBreak="${t.pageBreakBefore && !sub ? 1 : 0}" columnBreak="0" merged="0"><hp:run charPrIDRef="0">${xml}<hp:t/></hp:run></hp:p>`;
+    // 문서가 표로 시작하면 구역 정의를 표가 든 문단에 함께 둔다 (따로 빈 문단을 두면 그 줄만큼 본문이 내려간다)
+    const sec = first ? this.secPrRun({ kind: 'para', style: pp, baseChar: defaultChar(), inlines: [], pageBreakBefore: false }) : '';
+    return `<hp:p id="${pid}" paraPrIDRef="${paraId}" styleIDRef="0" pageBreak="${t.pageBreakBefore && !sub ? 1 : 0}" columnBreak="0" merged="0">${sec}<hp:run charPrIDRef="0">${xml}<hp:t/></hp:run></hp:p>`;
   }
 
   /** 글상자 → 사각형 도형(hp:rect) 안의 글 */
@@ -363,6 +381,19 @@ class SectionWriter {
     const bodyW = this.bodyWidthHwp;
     const hf = (kind: 'header' | 'footer') => {
       const def = kind === 'header' ? s.header : s.footer;
+      const height0 = mmToHwp(kind === 'header' ? s.page.marginHeader : s.page.marginFooter);
+      const rich = richHF(def);
+      if (rich) {
+        // 표·그림이 든 머리말/꼬리말: 본문과 같은 방식으로
+        this.inHF = true;
+        let inner = '';
+        try {
+          inner = this.blocks(rich, true);
+        } finally {
+          this.inHF = false;
+        }
+        if (inner) return `<hp:ctrl><hp:${kind} id="${kind === 'header' ? 0 : 1}" applyPageType="BOTH">${this.subList(inner, kind === 'header' ? 'TOP' : 'BOTTOM', bodyW, height0)}</hp:${kind}></hp:ctrl>`;
+      }
       if (!def.text.trim()) return '';
       const pp = defaultPara();
       pp.align = def.align;
@@ -430,9 +461,9 @@ function headerXml(reg: Registry): string {
 
   const charXml = reg.chars
     .map((c, i) => {
-      const f = reg.font(c.font);
+      const ids = langFontIds(c, (n) => reg.font(n));
       let x = `<hh:charPr id="${i}" height="${ptToHwp(c.size)}" textColor="${normColor(c.color) || '#000000'}" shadeColor="${normColor(c.highlight) || 'none'}" useFontSpace="0" useKerning="0" symMark="NONE" borderFillIDRef="2">`;
-      x += `<hh:fontRef ${langAttrs(f)}/><hh:ratio ${langAttrs(c.fontWidth || 100)}/><hh:spacing ${langAttrs(Math.max(-50, Math.min(50, Math.round(c.letterSpacing || 0))))}/><hh:relSz ${langAttrs(100)}/><hh:offset ${langAttrs(0)}/>`;
+      x += `<hh:fontRef ${LANG_ATTRS.map((l, k) => `${l}="${ids[k]}"`).join(' ')}/><hh:ratio ${langAttrs(c.fontWidth || 100)}/><hh:spacing ${langAttrs(Math.max(-50, Math.min(50, Math.round(c.letterSpacing || 0))))}/><hh:relSz ${langAttrs(100)}/><hh:offset ${langAttrs(0)}/>`;
       if (c.italic) x += '<hh:italic/>';
       if (c.bold) x += '<hh:bold/>';
       x += `<hh:underline type="${c.underline ? 'BOTTOM' : 'NONE'}" shape="SOLID" color="#000000"/>`;
@@ -455,14 +486,16 @@ function headerXml(reg: Registry): string {
         lsType = 'FIXED';
         lsVal = ptToHwp(parseFloat(p.lineHeight));
       } else if (p.lineHeight) lsVal = Math.round(parseFloat(p.lineHeight) * 100) || 160;
-      const m = (tag: string, v: number) => `<hc:${tag} value="${ptToHwp(v)}" unit="HWPUNIT"/>`;
+      const m = (tag: string, v: number, k = 1) => `<hc:${tag} value="${ptToHwp(v) * k}" unit="HWPUNIT"/>`;
+      // 한글과 같이 두 벌로: 글자 단위를 아는 판(값 그대로)과 기본(값 2배). 한 벌만 두면 한글이 기본 형식으로 읽어 여백이 반이 된다
+      const margin = (k: number) => `<hh:margin>${m('intent', p.textIndent, k)}${m('left', p.indentLeft, k)}${m('right', p.indentRight, k)}${m('prev', p.spaceBefore, k)}${m('next', p.spaceAfter, k)}</hh:margin>`;
+      const spacing = `<hh:lineSpacing type="${lsType}" value="${lsVal}" unit="HWPUNIT"/>`;
       return (
         `<hh:paraPr id="${i}" tabPrIDRef="0" condense="0" fontLineHeight="0" snapToGrid="1" suppressLineNumbers="0" checked="0">` +
         `<hh:align horizontal="${hwpAlign(p.align)}" vertical="BASELINE"/><hh:heading type="NONE" idRef="0" level="0"/>` +
         `<hh:breakSetting breakLatinWord="KEEP_WORD" breakNonLatinWord="${p.breakChar ? 'KEEP_WORD' : 'BREAK_WORD'}" widowOrphan="0" keepWithNext="0" keepLines="0" pageBreakBefore="0" lineWrap="BREAK"/>` +
         `<hh:autoSpacing eAsianEng="0" eAsianNum="0"/>` +
-        `<hh:margin>${m('intent', p.textIndent)}${m('left', p.indentLeft)}${m('right', p.indentRight)}${m('prev', p.spaceBefore)}${m('next', p.spaceAfter)}</hh:margin>` +
-        `<hh:lineSpacing type="${lsType}" value="${lsVal}" unit="HWPUNIT"/>` +
+        `<hp:switch><hp:case hp:required-namespace="http://www.hancom.co.kr/hwpml/2016/HwpUnitChar">${margin(1)}${spacing}</hp:case><hp:default>${margin(2)}${spacing}</hp:default></hp:switch>` +
         `<hh:border borderFillIDRef="${p.bfId}" offsetLeft="0" offsetRight="0" offsetTop="0" offsetBottom="0" connect="0" ignoreMargin="0"/></hh:paraPr>`
       );
     })
@@ -487,8 +520,9 @@ function headerXml(reg: Registry): string {
     `</hh:numbering></hh:numberings>`;
 
   return (
+    // 한글 2018 과 같은 1.4: 1.2 로 두면 한글이 문단 여백(hp:switch 의 값)을 반으로 읽는다
     XML_DECL +
-    `<hh:head ${NS} version="1.2" secCnt="1"><hh:beginNum page="1" footnote="1" endnote="1" pic="1" tbl="1" equation="1"/><hh:refList>` +
+    `<hh:head ${NS} version="1.4" secCnt="1"><hh:beginNum page="1" footnote="1" endnote="1" pic="1" tbl="1" equation="1"/><hh:refList>` +
     `<hh:fontfaces itemCnt="7">${fontsXml}</hh:fontfaces>` +
     `<hh:borderFills itemCnt="${reg.borderFills.length}">${bfXml}</hh:borderFills>` +
     `<hh:charProperties itemCnt="${reg.chars.length}">${charXml}</hh:charProperties>` +
@@ -526,9 +560,21 @@ function previewText(blocks: FlatBlock[]): string {
   return lines.join('\r\n').slice(0, 1024);
 }
 
+const PAGE_NUM_CTRL = `<hp:ctrl><hp:autoNum num="1" numType="PAGE"><hp:autoNumFormat type="DIGIT" userChar="" prefixChar="" suffixChar="" supscript="0"/></hp:autoNum></hp:ctrl>`;
+
+/** 표·그림이 든 머리말/꼬리말의 블록 (없으면 null) */
+function richHF(def: HeaderFooter): FlatBlock[] | null {
+  if (!Array.isArray(def.content) || !def.content.length) return null;
+  try {
+    return flattenDoc({ type: 'doc', content: def.content } as JNode);
+  } catch {
+    return null;
+  }
+}
+
 export async function writeHwpx(doc: KDocument, opts: { pageCount?: number } = {}): Promise<Uint8Array> {
   const blocks = flattenDoc(doc.content as JNode);
-  if (!blocks.length || blocks[0].kind !== 'para') {
+  if (!blocks.length || (blocks[0].kind !== 'para' && blocks[0].kind !== 'table')) {
     const p: FlatPara = { kind: 'para', style: defaultPara(), baseChar: defaultChar(), inlines: [], pageBreakBefore: false };
     blocks.unshift(p);
   }
@@ -540,6 +586,7 @@ export async function writeHwpx(doc: KDocument, opts: { pageCount?: number } = {
   // 그림 준비
   const srcs = new Set<string>();
   collectImageSrcs(blocks, srcs);
+  for (const hf of [doc.settings.header, doc.settings.footer]) collectImageSrcs(richHF(hf) || [], srcs);
   const imageInfo = new Map<string, { id: string; w: number; h: number } | null>();
   let imgNo = 0;
   for (const src of srcs) {
@@ -561,7 +608,7 @@ export async function writeHwpx(doc: KDocument, opts: { pageCount?: number } = {
   blocks.forEach((b, i) => {
     if (b.kind === 'para') body += sw.paragraph(b, { sub: false, first: i === 0 });
     else if (b.kind === 'box') body += sw.box(b, false);
-    else body += sw.table(b, false);
+    else body += sw.table(b, false, i === 0);
   });
   const section = XML_DECL + `<hs:sec ${NS}>${body}</hs:sec>`;
   const header = headerXml(reg);
@@ -589,7 +636,7 @@ export async function writeHwpx(doc: KDocument, opts: { pageCount?: number } = {
   zip.file(
     'version.xml',
     XML_DECL +
-      `<hv:HCFVersion xmlns:hv="http://www.hancom.co.kr/hwpml/2011/version" tagetApplication="WORDPROCESSOR" major="5" minor="1" micro="0" buildNumber="1" os="1" xmlVersion="1.2" application="Hancom Office Hangul" appVersion="11, 0, 0, 2129 WIN32LEWindows_8"/>`,
+      `<hv:HCFVersion xmlns:hv="http://www.hancom.co.kr/hwpml/2011/version" tagetApplication="WORDPROCESSOR" major="5" minor="1" micro="0" buildNumber="1" os="1" xmlVersion="1.4" application="Hancom Office Hangul" appVersion="11, 0, 0, 2129 WIN32LEWindows_8"/>`,
     { compression: 'STORE' },
   );
   zip.file('Contents/header.xml', header);

@@ -7,6 +7,7 @@ import { TEXT_EFFECT_CSS } from '../../editor/extensions/textStyleExt';
 export function CharShapeDialog({ onClose }: { onClose: () => void }) {
   const editor = app.active!.editor;
   const ts = editor.getAttributes('textStyle');
+  const initFont = currentFont(editor);
   const [s, setS] = useState({
     font: currentFont(editor),
     size: currentFontSize(editor),
@@ -27,6 +28,8 @@ export function CharShapeDialog({ onClose }: { onClose: () => void }) {
     const c = editor.chain().focus();
     c.setTextStyleAttrs({
       fontFamily: s.font,
+      // 글꼴을 바꾸면 언어별 글꼴(한글 문서)도 그 글꼴로
+      ...(s.font !== initFont ? { langFonts: null } : {}),
       fontSize: s.size,
       color: s.color && s.color !== '#000000' ? s.color : null,
       letterSpacing: s.letterSpacing || null,

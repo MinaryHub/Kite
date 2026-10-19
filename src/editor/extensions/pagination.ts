@@ -34,6 +34,14 @@ export interface PageBreakInfo {
   pos: number;
   height: number;
   kind: 'block' | 'row' | 'line';
+  /** 표가 이어지는 쪽의 맨 위에 되풀이할 제목 줄: 표 위치, 그 쪽 번호(0부터), 제목 줄 높이(px). 높이만큼 공간에 더해 둔다 */
+  head?: RepeatHead;
+}
+
+export interface RepeatHead {
+  table: number;
+  page: number;
+  h: number;
 }
 
 export interface FootnoteInfo {
@@ -48,6 +56,8 @@ export interface LayoutResult {
   footnotes: FootnoteInfo[];
   /** 각 쪽의 시작 문서 위치 (쪽 이동용) */
   pageStarts: number[];
+  /** 쪽 맨 위에 되풀이해 그릴 표 제목 줄 */
+  repeats?: RepeatHead[];
 }
 
 interface PState {
@@ -66,6 +76,23 @@ export function estimateFootnoteHeight(text: string, width: number): number {
   for (const ch of text) w += /[ᄀ-ᇿ　-鿿가-힯＀-￯]/.test(ch) ? FN_FONT_PX : FN_FONT_PX * 0.55;
   const lines = Math.max(1, Math.ceil((w + 28) / Math.max(50, width)));
   return Math.ceil(lines * FN_FONT_PX * FN_LINE + 2);
+}
+
+/**
+ * 칸의 높이 중 내용이 차지하는 몫 (위아래 안 여백·선 포함, 세로 가운데 정렬로 남는 공간 제외). 배치 값(offset)으로
+ * 재므로 글자 위치를 옮기는 transform 의 영향을 받지 않는다. 잴 수 없으면 null
+ */
+function cellContentHeight(td: HTMLElement | null): number | null {
+  if (!(td instanceof HTMLElement)) return null;
+  const kids = Array.from(td.children).filter((c) => c instanceof HTMLElement && !c.classList.contains('pg-spacer') && getComputedStyle(c).display !== 'none') as HTMLElement[];
+  if (!kids.length) return null;
+  const first = kids[0];
+  const last = kids[kids.length - 1];
+  const cs = getComputedStyle(td);
+  const px = (v: string) => parseFloat(v) || 0;
+  const top = first.offsetTop - px(getComputedStyle(first).marginTop);
+  const bottom = last.offsetTop + last.offsetHeight + px(getComputedStyle(last).marginBottom);
+  return px(cs.paddingTop) + px(cs.borderTopWidth) + (bottom - top) + px(cs.paddingBottom) + px(cs.borderBottomWidth);
 }
 
 function buildDecos(doc: PMNode, breaks: PageBreakInfo[]): DecorationSet {
@@ -98,12 +125,22 @@ function buildDecos(doc: PMNode, breaks: PageBreakInfo[]): DecorationSet {
   return DecorationSet.create(doc, decos);
 }
 
+/** 제목 칸으로만 된 줄인가 */
+export function isHeaderRow(row: PMNode): boolean {
+  let all = true;
+  row.forEach((c) => {
+    if (c.type.name !== 'tableHeader') all = false;
+  });
+  return all;
+}
+
 const CONTAINERS = new Set(['bulletList', 'orderedList', 'listItem', 'blockquote', 'taskList', 'taskItem']);
 
 function sameBreaks(a: PageBreakInfo[], b: PageBreakInfo[]) {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
     if (a[i].pos !== b[i].pos || a[i].kind !== b[i].kind || Math.abs(a[i].height - b[i].height) > 0.6) return false;
+    if (a[i].head?.table !== b[i].head?.table || a[i].head?.page !== b[i].head?.page) return false;
   }
   return true;
 }
@@ -177,6 +214,8 @@ function computeLayout(
   let fnUsed = 0;
   let forceNext = false;
   let lastBottom = 0;
+  /** 지금 배치하는 표의 되풀이할 제목 줄 (제목 줄 다음 줄들을 배치하는 동안만) */
+  let tableHead: { table: number; h: number } | null = null;
   let breaks: PageBreakInfo[] = [];
   let footnotes: FootnoteInfo[] = [];
   let pageStarts: number[] = [0];
@@ -444,7 +483,18 @@ function computeLayout(
     markPageStart(rowPos);
     const startPage = page;
     const PAD = 3;
-    let rowBottom = uBottom; // 자연 배치 기준 (shift 미포함)
+    // 칸마다 같은 쪽으로 넘어가므로 제목 줄은 쪽마다 한 번만 적어 둔다
+    const headPages = new Set<number>();
+    const headFor = (pg: number): { head?: RepeatHead } => {
+      if (!tableHead || headPages.has(pg)) return {};
+      headPages.add(pg);
+      return { head: { table: tableHead.table, page: pg, h: tableHead.h } };
+    };
+    // 나뉜 줄의 높이 = max(줄 최소 높이, 칸마다 '내용 높이 + 끼운 공간'). 자연 배치의 아래 끝(uBottom)을 기준으로 하면
+    // 최소 높이 안에서 가운데 정렬된 칸의 남는 공간까지 늘어난다고 보게 되어 뒤 내용의 자리가 어긋난다
+    const rowEl = view.nodeDOM(rowPos) as HTMLElement | null;
+    const minH = rowEl ? parseFloat(getComputedStyle(rowEl).getPropertyValue('--row-h')) || 0 : 0;
+    let rowBottom = uTop + minH; // 자연 배치 기준 (shift 미포함)
     rowNode.forEach((cell, off) => {
       const cellPos = rowPos + 1 + off;
       let cs = 0;
@@ -468,23 +518,27 @@ function computeLayout(
               if (lb > pc * P + CH + 0.5 && lt > pc * P + 0.5) {
                 const p = li === 0 ? lf.pos : posAtLineStart(el, lines[li], lf.pos, lf.pos + lf.node.nodeSize);
                 if (p != null) {
-                  const h = Math.round(((pc + 1) * P - lt) * 100) / 100;
-                  breaks.push({ pos: p, height: h, kind: li === 0 ? 'block' : 'line' });
+                  const h = Math.round(((pc + 1) * P - lt + (tableHead?.h || 0)) * 100) / 100;
+                  breaks.push({ pos: p, height: h, kind: li === 0 ? 'block' : 'line', ...headFor(pc + 1) });
                   cs += h;
                   pc++;
                 }
               }
             }
           } else if (sT > pc * P + 0.5) {
-            const h = Math.round(((pc + 1) * P - sT) * 100) / 100;
-            breaks.push({ pos: lf.pos, height: h, kind: 'block' });
+            const h = Math.round(((pc + 1) * P - sT + (tableHead?.h || 0)) * 100) / 100;
+            breaks.push({ pos: lf.pos, height: h, kind: 'block', ...headFor(pc + 1) });
             cs += h;
             pc++;
           }
         }
         last = Math.max(last, bottom + cs);
       }
-      if (last > -Infinity) rowBottom = Math.max(rowBottom, last + PAD);
+      // 여러 줄을 합친 칸은 끼운 공간이 합친 줄들에 나뉘어 들어가므로 이 줄의 높이로 치지 않는다
+      if ((cell.attrs.rowspan || 1) > 1) return;
+      const h = cellContentHeight(view.nodeDOM(cellPos) as HTMLElement | null);
+      if (h != null) rowBottom = Math.max(rowBottom, uTop + h + cs);
+      else if (last > -Infinity) rowBottom = Math.max(rowBottom, last + PAD);
     });
     // 이 줄이 늘어난 만큼 뒤 내용도 밀린다
     const extra = rowBottom - uBottom;
@@ -526,9 +580,14 @@ function computeLayout(
       place(top, bottom, fnTotal, () => pos, 'block', pos);
       return;
     }
+    // 제목 줄(맨 앞의 제목 칸으로만 된 줄들): 표가 다음 쪽으로 이어지면 그 쪽 맨 위에 되풀이한다
+    let headN = 0;
+    while (headN < node.childCount - 1 && node.child(headN).childCount > 0 && isHeaderRow(node.child(headN))) headN++;
+    const headH = headN ? rel(rows[Math.min(headN, rows.length) - 1].el.getBoundingClientRect().bottom) - top : 0;
     rows.forEach((row, i) => {
       const rr = row.el.getBoundingClientRect();
       const uTop = i === 0 ? top : rel(rr.top);
+      tableHead = headN && i >= headN && headH > 0 && headH < CH / 3 ? { table: pos, h: headH } : null;
       const uBottom = i === rows.length - 1 ? bottom : rel(rr.bottom);
       // 한글 기본(셀 단위 나눔)처럼, 넘치는 줄은 셀 내용을 쪽 경계에서 나눈다 (짧은 줄은 통째로 넘김)
       let pp = page;
@@ -540,10 +599,21 @@ function computeLayout(
       }
       const rowFns = collectFootnotes(row.el, pos);
       const fnH = rowFns.reduce((a, f) => a + f.h, 0);
+      const nb = breaks.length;
+      const pg0 = page;
       if (i === 0) place(uTop, uBottom, fnH, () => pos, 'block', pos);
       else place(uTop, uBottom, fnH, () => row.pos, 'row', row.pos);
+      // 이 줄이 다음 쪽으로 넘어갔으면 그 쪽 맨 위에 제목 줄 자리를 비운다
+      if (tableHead && breaks.length > nb && page > pg0) {
+        const b = breaks[breaks.length - 1];
+        b.height = Math.round((b.height + tableHead.h) * 100) / 100;
+        b.head = { table: tableHead.table, page, h: tableHead.h };
+        shift += tableHead.h;
+        lastBottom += tableHead.h;
+      }
       pushFootnotes(rowFns);
     });
+    tableHead = null;
   };
 
   const handleOther = (pos: number) => {
@@ -656,7 +726,8 @@ function computeLayout(
   }
   while (pageStarts.length < pageCount) pageStarts.push(doc.content.size);
   if (pageStarts.length > pageCount) pageStarts = pageStarts.slice(0, pageCount);
-  const result: LayoutResult = { pageCount, footnotes, pageStarts };
+  const repeats = breaks.filter((b) => b.head).map((b) => b.head!);
+  const result: LayoutResult = { pageCount, footnotes, pageStarts, ...(repeats.length ? { repeats } : {}) };
   return { breaks, result, cache: { doc, snaps, breaksLen: breaks.length, footnotes, pageStarts, pageCount, lastBottom }, incremental: useCache };
 }
 
@@ -719,7 +790,7 @@ export const Pagination = Extension.create<{}, PaginationStorage>({
             if (tr.docChanged) {
               noteDirty(tr);
               return {
-                breaks: value.breaks.map((b) => ({ ...b, pos: tr.mapping.map(b.pos, b.kind === 'line' ? 1 : -1) })),
+                breaks: value.breaks.map((b) => ({ ...b, pos: tr.mapping.map(b.pos, b.kind === 'line' ? 1 : -1), ...(b.head ? { head: { ...b.head, table: tr.mapping.map(b.head.table, -1) } } : {}) })),
                 decos: value.decos.map(tr.mapping, tr.doc),
               };
             }

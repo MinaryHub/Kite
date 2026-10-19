@@ -20,6 +20,11 @@ export interface HeaderFooter {
   /** 텍스트. {{PAGE}} = 현재 쪽, {{PAGES}} = 전체 쪽 수 */
   text: string;
   align: HFAlign;
+  /**
+   * 표·그림이 든 머리말/꼬리말 (HWP 에서 읽은 문서 블록 JSON). 있으면 text 대신 이것을 그린다.
+   * 글자 '{{PAGE}}' 는 쪽 번호로 바뀐다. 대화상자에서 text 를 고치면 지워진다.
+   */
+  content?: JSONContent[];
 }
 
 export type PageNumPos =
@@ -49,6 +54,11 @@ export interface DocSettings {
    * 줄 간격보다 높아지지 않게 한다. PDF 에서 불러온 문서에 켠다.
    */
   fixedLines?: boolean;
+  /**
+   * 글자 폭을 한글(HWP) 방식으로 그린다: 자간·장평은 그 글자 폭에 대한 비율, 빈칸은 글자 크기의 절반.
+   * HWP/HWPX 에서 불러온 문서에 켠다.
+   */
+  hwpMetrics?: boolean;
   /**
    * PDF 에서 꺼낸 글꼴 (시스템에 없는 글꼴의 일부 글자). 문서와 함께 다녀서 자동 저장에서 복구해도
    * 같은 글꼴로 그린다. data 는 base64 OpenType.

@@ -1,4 +1,5 @@
-import type { DocSettings } from './types';
+import type { DocSettings, HeaderFooter } from './types';
+import { hfRichHtml } from './hfRich';
 import type { DocTab } from './doc/docTab';
 import { PX_PER_MM, formatPageNumber, xmlEscape } from './formats/common';
 import { FN_FONT_PX, FN_LINE, FN_SEP } from './editor/extensions/pagination';
@@ -88,6 +89,38 @@ export function pageBackgroundStyle(s: DocSettings, k: number, dy = 0): Record<s
   };
 }
 
+/**
+ * k 번째 쪽 맨 위에 되풀이할 표 제목 줄의 HTML. 쪽 나누기가 그 자리를 비워 두었으므로(LayoutResult.repeats)
+ * 편집 화면의 표에서 제목 줄만 복제해 본문 맨 위에 놓는다. 편집 대상은 아니다.
+ */
+export function repeatHeadsHtml(tab: DocTab, g: PageGeom, k: number): string {
+  const reps = (tab.layout.repeats || []).filter((r) => r.page === k);
+  if (!reps.length) return '';
+  const cls = 'kdoc-content' + (tab.settings.hwpMetrics ? ' hwp-metrics' : '') + (tab.settings.fixedLines ? ' fixed-lines' : '');
+  let html = '';
+  for (const r of reps) {
+    let dom: Node | null = null;
+    try {
+      dom = tab.editor.view.nodeDOM(r.table);
+    } catch {
+      continue;
+    }
+    const table = dom instanceof HTMLElement ? (dom.tagName === 'TABLE' ? dom : dom.querySelector(':scope > table')) : null;
+    if (!table) continue;
+    const clone = table.cloneNode(true) as HTMLElement;
+    let head = true;
+    clone.querySelectorAll(':scope > tbody > tr').forEach((tr) => {
+      if (head && tr.children.length && Array.from(tr.children).every((c) => c.tagName === 'TH')) return;
+      head = false;
+      tr.remove();
+    });
+    clone.querySelectorAll('.pg-spacer, .table-handle, .column-resize-handle, .ProseMirror-separator, .ProseMirror-trailingBreak').forEach((e) => e.remove());
+    clone.querySelectorAll('.pg-push-row, .selectedCell').forEach((e) => e.classList.remove('pg-push-row', 'selectedCell'));
+    html += `<div class="${cls} pg-repeat-head" style="position:absolute;left:${g.ml}px;top:${g.mt}px;width:${g.contentW}px;pointer-events:none">${clone.outerHTML}</div>`;
+  }
+  return html;
+}
+
 /** 한 쪽의 머리말/꼬리말/쪽 번호/각주 HTML */
 export function pageChromeHtml(tab: DocTab, g: PageGeom, k: number, pageCount: number): string {
   const s = tab.settings;
@@ -95,10 +128,13 @@ export function pageChromeHtml(tab: DocTab, g: PageGeom, k: number, pageCount: n
   const num = s.pageNumber.start + k;
   const total = pageCount + s.pageNumber.start - 1;
   let html = '';
-  const zone = (def: { text: string; align: string }, top: number, height: number, valign: string) => {
+  const zone = (def: HeaderFooter, top: number, height: number, valign: string) => {
+    const rich = hfRichHtml(def);
+    if (rich) return `<div class="kdoc-content hf-rich" style="position:absolute;left:${g.ml}px;width:${g.contentW}px;top:${top}px">${hfText(rich, num, total, s.pageNumber.format)}</div>`;
     if (!def.text.trim()) return '';
     return `<div style="position:absolute;left:${g.ml}px;width:${g.contentW}px;top:${top}px;height:${height}px;display:flex;align-items:${valign};justify-content:${def.align === 'left' ? 'flex-start' : def.align === 'right' ? 'flex-end' : 'center'};font-family:'함초롬바탕','HCR Batang','바탕',serif;font-size:9pt;white-space:pre;overflow:hidden">${xmlEscape(hfText(def.text, num, total, s.pageNumber.format))}</div>`;
   };
+  html += repeatHeadsHtml(tab, g, k);
   html += zone(s.header, z.header.top, z.header.height, 'flex-start');
   html += zone(s.footer, z.footer.top, z.footer.height, 'flex-end');
   if (s.pageNumber.pos !== 'none') {
@@ -142,7 +178,7 @@ export function buildPrintPage(tab: DocTab, g: PageGeom, k: number, boxes: PageB
   body.className = 'print-body';
   Object.assign(body.style, { left: `${g.ml}px`, top: `${g.mt}px`, width: `${g.contentW}px`, height: `${g.contentH}px` });
   const content = document.createElement('div');
-  content.className = 'kdoc-content';
+  content.className = 'kdoc-content' + (tab.settings.hwpMetrics ? ' hwp-metrics' : '') + (tab.settings.fixedLines ? ' fixed-lines' : '');
   Object.assign(content.style, { position: 'relative', width: `${g.contentW}px`, height: `${g.contentH}px` });
   const y0 = k * g.P;
   const y1 = y0 + g.contentH;

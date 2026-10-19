@@ -1,8 +1,8 @@
 import * as CFB from 'cfb';
 import { deflateRaw } from 'pako';
-import type { KDocument } from '../../types';
-import { type JNode, mmToHwp, pxToHwp, ptToHwp, parseBorderCss, HWP_BORDER_WIDTHS } from '../common';
-import { type CharStyle, type FlatBlock, type FlatInline, type FlatPara, type FlatTable, type ParaStyle, charKey, defaultChar, defaultPara, flattenDoc, paraKey, unwrapBoxes } from '../flatten';
+import type { HeaderFooter, KDocument } from '../../types';
+import { type JNode, mmToHwp, pxToHwp, ptToHwp, parseBorderCss, HWP_BORDER_WIDTHS, FIXED_SPACE } from '../common';
+import { type CharStyle, type FlatBlock, type FlatInline, type FlatPara, type FlatTable, type ParaStyle, charKey, langFontIds, defaultChar, defaultPara, flattenDoc, paraKey, unwrapBoxes } from '../flatten';
 import { prepareImage } from '../imageUtil';
 
 /**
@@ -170,7 +170,7 @@ class Registry {
       id = this.chars.length;
       this.chars.push(c);
       this.charIds.set(k, id);
-      this.font(c.font);
+      langFontIds(c, (n) => this.font(n));
     }
     return id;
   }
@@ -205,8 +205,8 @@ const NUMBERING_TEMPLATE = hex(
 
 function charShapeRec(r: Registry, c: CharStyle): Uint8Array {
   const b = new Buf();
-  const f = r.font(c.font);
-  for (let i = 0; i < 7; i++) b.u16(f);
+  // 언어별 글꼴 번호 (글꼴 목록은 언어마다 같은 순서로 기록한다)
+  for (const f of langFontIds(c, (n) => r.font(n))) b.u16(f);
   for (let i = 0; i < 7; i++) b.u8(Math.max(50, Math.min(200, Math.round(c.fontWidth || 100))));
   for (let i = 0; i < 7; i++) b.i8(Math.max(-50, Math.min(50, Math.round(c.letterSpacing || 0))));
   for (let i = 0; i < 7; i++) b.u8(100);
@@ -323,6 +323,8 @@ interface ParaBuild {
 class BodyWriter {
   w = new RecWriter();
   footNo = 0;
+  /** 머리말/꼬리말을 쓰는 중 ({{PAGE}} → 쪽 번호 필드) */
+  inHF = false;
   constructor(
     private reg: Registry,
     private doc: KDocument,
@@ -403,7 +405,14 @@ class BodyWriter {
       if (it.type === 'text') {
         this.setShape(pb, this.reg.char(it.style));
         pb.maxSize = Math.max(pb.maxSize, it.style.size);
-        for (const ch of it.text) {
+        // 머리말/꼬리말 안의 쪽 번호 자리({{PAGE}})는 쪽 번호 필드로
+        const parts = this.inHF ? it.text.split('{{PAGE}}') : [it.text];
+        parts.forEach((part, pi) => {
+        if (pi > 0) {
+          this.ctrlChars(pb, 18, 'atno');
+          pb.ctrls.push((ww, l2) => ww.rec(TAG.CTRL_HEADER, l2, new Buf().u32(ctrlId('atno')).u32(0).u16(1).u16(0).u16(0).u16(0).out()));
+        }
+        for (const ch of part) {
           const code = ch.codePointAt(0)!;
           if (ch === '\t') {
             // 탭: 폭(UINT32)·채움·종류를 가진 8 WCHAR 인라인 컨트롤
@@ -411,11 +420,14 @@ class BodyWriter {
             pb.text.push(9, tw & 0xffff, tw >>> 16, ((it.tab?.leader || 0) & 0xff) | (((it.tab?.type || 0) & 0xff) << 8), 0, 0, 0, 9);
           }
           else if (code < 32) continue;
+          // 고정폭 빈칸 (읽을 때 U+2005 로 바꾼 것)
+          else if (code === FIXED_SPACE) pb.text.push(31);
           else if (code > 0xffff) {
             const s = ch;
             pb.text.push(s.charCodeAt(0), s.charCodeAt(1));
           } else pb.text.push(code);
         }
+        });
       } else if (it.type === 'break') {
         pb.text.push(10);
       } else if (it.type === 'image') {
@@ -512,8 +524,22 @@ class BodyWriter {
     this.w = saved;
   }
 
-  private headerFooter(w: RecWriter, lv: number, kind: 'head' | 'foot', text: string, align: string, heightHwp: number) {
+  private headerFooter(w: RecWriter, lv: number, kind: 'head' | 'foot', text: string, align: string, heightHwp: number, rich: FlatBlock[] | null = null) {
     w.rec(TAG.CTRL_HEADER, lv, new Buf().u32(ctrlId(kind)).u32(0).u32(1).out());
+    if (rich && rich.length) {
+      // 표·그림이 든 머리말/꼬리말: 본문과 같은 방식으로 문단·표를 쓴다 (문단 수 = 최상위 블록 수)
+      w.rec(TAG.LIST_HEADER, lv + 1, new Buf().i16(rich.length).u32(kind === 'foot' ? 0x00400000 : 0).u16(0).u32(this.bodyW).u32(heightHwp).zeros(18).out());
+      const saved = this.w;
+      this.w = w;
+      this.inHF = true;
+      try {
+        this.blocks(rich, lv + 1);
+      } finally {
+        this.inHF = false;
+        this.w = saved;
+      }
+      return;
+    }
     w.rec(TAG.LIST_HEADER, lv + 1, new Buf().i16(1).u32(kind === 'foot' ? 0x00400000 : 0).u16(0).u32(this.bodyW).u32(heightHwp).zeros(18).out());
     const c = defaultChar();
     c.size = 9;
@@ -574,13 +600,15 @@ class BodyWriter {
       this.ctrlChars(pb, 16, 'head');
       const t = s.header.text;
       const a = s.header.align;
-      pb.ctrls.push((w, lv) => this.headerFooter(w, lv, 'head', t, a, hfHeight(pg.marginHeader)));
+      const rich = richHF(s.header);
+      pb.ctrls.push((w, lv) => this.headerFooter(w, lv, 'head', t, a, hfHeight(pg.marginHeader), rich));
     }
     if (s.footer.text.trim()) {
       this.ctrlChars(pb, 16, 'foot');
       const t = s.footer.text;
       const a = s.footer.align;
-      pb.ctrls.push((w, lv) => this.headerFooter(w, lv, 'foot', t, a, hfHeight(pg.marginFooter)));
+      const rich = richHF(s.footer);
+      pb.ctrls.push((w, lv) => this.headerFooter(w, lv, 'foot', t, a, hfHeight(pg.marginFooter), rich));
     }
     if (s.pageNumber.pos !== 'none') {
       const POS: Record<string, number> = { 'top-left': 1, 'top-center': 2, 'top-right': 3, 'bottom-left': 4, 'bottom-center': 5, 'bottom-right': 6 };
@@ -601,14 +629,18 @@ class BodyWriter {
     this.emitPara(pb, this.reg.para(p.style), level, last, first ? 3 : p.pageBreakBefore && level === 0 ? 4 : 0);
   }
 
-  table(t: FlatTable, level: number, last: boolean) {
+  table(t: FlatTable, level: number, last: boolean, first = false) {
     const pb = this.beginPara();
     this.setShape(pb, 0);
+    // 문서가 표로 시작하면 구역 정의를 표가 든 문단에 함께 둔다 (따로 빈 문단을 두면 그 줄만큼 본문이 내려간다)
+    if (first) this.sectionCtrls(pb);
     this.ctrlChars(pb, 11, 'tbl ');
     pb.ctrls.push((w, lv) => this.tableCtrl(w, lv, t));
     const pp = defaultPara();
     if (t.align !== 'left') pp.align = t.align as any;
-    this.emitPara(pb, this.reg.para(pp), level, last, t.pageBreakBefore && level === 0 ? 4 : 0);
+    // 글자처럼 놓인 표의 줄: 줄 간격이 160% 면 표 아래에 글자 크기의 60% 만큼 빈자리가 더 생긴다
+    if (t.inline) pp.lineHeight = '1';
+    this.emitPara(pb, this.reg.para(pp), level, last, first ? 3 : t.pageBreakBefore && level === 0 ? 4 : 0);
   }
 
   private tableCtrl(w: RecWriter, lv: number, t: FlatTable) {
@@ -616,10 +648,14 @@ class BodyWriter {
     const scale = Math.min(1, this.bodyW / pxToHwp(totalPx));
     const colW = t.colWidthsPx.map((x) => Math.round(pxToHwp(x) * scale));
     const tableW = colW.reduce((a, b) => a + b, 0);
-    const rowHs = Array.from({ length: t.rows }, (_, i) => (t.rowHeightsPx?.[i] ? Math.max(1000, pxToHwp(t.rowHeightsPx[i]!) + 282) : 1000));
+    const rowHs = Array.from({ length: t.rows }, (_, i) => (t.rowHeightsPx?.[i] ? Math.max(283, pxToHwp(t.rowHeightsPx[i]!) + 282) : 1000));
     const spanH = (r: number, n: number) => rowHs.slice(r, r + n).reduce((a, b) => a + b, 0);
     const pad = pxToHwp(t.cellPadPx);
-    w.rec(TAG.CTRL_HEADER, lv, new Buf().u32(ctrlId('tbl ')).u32(0x082a2210).i32(0).i32(0).u32(tableW).u32(spanH(0, t.rows)).i32(0).u16(283).u16(283).u16(283).u16(283).u32(inst()).u32(0).u16(0).out());
+    // 글자처럼 취급(bit 0)이면 표가 든 문단의 정렬을, 아니면 가로 정렬(bit 10~12)을 따른다. 바깥 여백은 읽은 값 그대로
+    // 바깥 여백: 한글에서 읽은 표는 그 값, Kite 에서 만든 표는 화면과 같이 0 (HWPX 와 같은 기본값)
+    const om = t.outMarginPx ? t.outMarginPx.map((v) => pxToHwp(v)) : [0, 0, 0, 0];
+    const objAttr = t.inline ? 0x082a2211 : (0x082a2210 | ((t.align === 'center' ? 1 : t.align === 'right' ? 2 : 0) << 10)) >>> 0;
+    w.rec(TAG.CTRL_HEADER, lv, new Buf().u32(ctrlId('tbl ')).u32(objAttr).i32(0).i32(0).u32(tableW).u32(spanH(0, t.rows)).i32(0).u16(om[0]).u16(om[1]).u16(om[2]).u16(om[3]).u32(inst()).u32(0).u16(0).out());
     const tb = new Buf().u32(0x04000006).u16(t.rows).u16(t.cols).u16(0).u16(pad).u16(pad).u16(141).u16(141);
     for (const row of t.cells) tb.u16(row.length);
     tb.u16(3).u16(0);
@@ -637,17 +673,18 @@ class BodyWriter {
           new Buf()
             .i16(nParas)
             .u32(va << 21)
-            .u16(0)
+            // 칸 자체 여백(bit 0), 제목 칸(bit 2)
+            .u16((cell.header ? 4 : 0) | (cell.marginsPx ? 1 : 0))
             .u16(cell.col)
             .u16(cell.row)
             .u16(cell.colspan)
             .u16(cell.rowspan)
             .u32(cw)
             .u32(spanH(cell.row, cell.rowspan))
-            .u16(pad)
-            .u16(pad)
-            .u16(141)
-            .u16(141)
+            .u16(cell.marginsPx ? pxToHwp(cell.marginsPx[0]) : pad)
+            .u16(cell.marginsPx ? pxToHwp(cell.marginsPx[1]) : pad)
+            .u16(cell.marginsPx ? pxToHwp(cell.marginsPx[2]) : 141)
+            .u16(cell.marginsPx ? pxToHwp(cell.marginsPx[3]) : 141)
             .u16(bf)
             .u32(cw)
             .zeros(9)
@@ -665,9 +702,19 @@ class BodyWriter {
     blocks.forEach((b, i) => {
       const last = i === blocks.length - 1;
       if (b.kind === 'para') this.para(b, level, last, topLevel && i === 0);
-      else if (b.kind === 'table') this.table(b, level, last);
+      else if (b.kind === 'table') this.table(b, level, last, topLevel && i === 0);
       else this.blocks(b.blocks, level, false);
     });
+  }
+}
+
+/** 표·그림이 든 머리말/꼬리말의 블록 (없으면 null) */
+function richHF(def: HeaderFooter): FlatBlock[] | null {
+  if (!Array.isArray(def.content) || !def.content.length) return null;
+  try {
+    return unwrapBoxes(flattenDoc({ type: 'doc', content: def.content } as JNode));
+  } catch {
+    return null;
   }
 }
 
@@ -692,7 +739,7 @@ function previewText(blocks: FlatBlock[]): string {
 export async function writeHwp(doc: KDocument, opts: { pageCount?: number } = {}): Promise<Uint8Array> {
   // 글상자는 아직 HWP 바이너리로 쓰지 않으므로 안의 문단만 남긴다
   const blocks = unwrapBoxes(flattenDoc(doc.content as JNode));
-  if (!blocks.length || blocks[0].kind !== 'para') blocks.unshift({ kind: 'para', style: defaultPara(), baseChar: defaultChar(), inlines: [], pageBreakBefore: false });
+  if (!blocks.length || (blocks[0].kind !== 'para' && blocks[0].kind !== 'table')) blocks.unshift({ kind: 'para', style: defaultPara(), baseChar: defaultChar(), inlines: [], pageBreakBefore: false });
   const reg = new Registry();
   const pg = doc.settings.page;
   const pageW = pg.landscape ? Math.max(pg.width, pg.height) : pg.width;
@@ -700,6 +747,7 @@ export async function writeHwp(doc: KDocument, opts: { pageCount?: number } = {}
 
   const srcs = new Set<string>();
   collectImages(blocks, srcs);
+  for (const hf of [doc.settings.header, doc.settings.footer]) collectImages(richHF(hf) || [], srcs);
   const images = new Map<string, { binId: number; w: number; h: number } | null>();
   for (const src of srcs) {
     const img = await prepareImage(src);

@@ -37,6 +37,7 @@ import { TableResize } from './extensions/tableResize';
 import { CheckMarks } from './extensions/checkMarks';
 import { Insertion, Deletion, TrackChanges } from './extensions/trackChanges';
 import { CommentMark } from './extensions/comments';
+import { HwpMetrics } from './extensions/hwpMetrics';
 
 /** 문서 스키마를 구성하는 확장 (편집기 없이 변환에도 사용) */
 export function getExtensions(): AnyExtension[] {
@@ -52,6 +53,16 @@ export function getExtensions(): AnyExtension[] {
     Color,
     // 글꼴 이름은 그대로 저장하고, 화면에는 대체 글꼴 목록을 붙여 그린다
     FontFamily.extend({
+      // 글꼴을 고르면 한글 문서에서 온 언어별 글꼴(영문·한자·기호)도 그 글꼴로 통일한다
+      addCommands() {
+        return {
+          ...this.parent?.(),
+          setFontFamily:
+            (fontFamily: string) =>
+            ({ chain }: any) =>
+              chain().setMark('textStyle', { fontFamily, langFonts: null }).run(),
+        };
+      },
       addGlobalAttributes() {
         return [
           {
@@ -114,7 +125,7 @@ export function getExtensions(): AnyExtension[] {
 
 /** 편집 화면용 확장 (스키마 + 편집 기능) */
 export function getEditorExtensions(): AnyExtension[] {
-  return [...getExtensions(), KeyboardExtras, CellNoWrap, Search, CharacterCount, Pagination, TableResize, CheckMarks, TrackChanges];
+  return [...getExtensions(), KeyboardExtras, CellNoWrap, Search, CharacterCount, Pagination, TableResize, CheckMarks, TrackChanges, HwpMetrics];
 }
 
 let cachedSchema: Schema | null = null;

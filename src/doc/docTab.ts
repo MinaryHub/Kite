@@ -52,6 +52,8 @@ export class DocTab {
       enableInputRules: true,
       enablePasteRules: true,
     });
+    // 한글 문서는 한글과 같은 글자 폭으로 (줄 바꿈·쪽 나누기가 한글과 맞게)
+    this.editor.storage.hwpMetrics.enabled = !!this.settings.hwpMetrics;
     if (init.content) this.setContent(init.content, true);
     this.savedDoc = this.editor.state.doc;
     this.editor.on('update', () => {

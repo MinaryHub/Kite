@@ -539,7 +539,31 @@ export function extractPage(ops: { fnArray: number[]; argsArray: any[] }, OPS: R
       }
     }
   }
-  return { width: W, height: H, glyphs, fills, segs, images, fontChars, vectors };
+  return { width: W, height: H, glyphs, fills, segs, images: dropGlyphImages(images, glyphs), fontChars, vectors };
+}
+
+/**
+ * 글자 자리에 겹쳐 놓인 글자 모양 그림을 뺀다. 한글이 만든 PDF 는 글꼴에 없는 기호(｢ ｣ 등)를
+ * 빈 Type3 글자(검색·복사용) + 같은 자리의 작은 그림(보이는 모양)으로 넣는다. 글자를 살리고 그림을 빼야
+ * 기호가 두 번 그려지지 않고 그림이 따로 줄을 차지하지 않는다.
+ */
+function dropGlyphImages<T extends { x0: number; y0: number; x1: number; y1: number }>(images: T[], glyphs: { ch: string; x: number; y: number; w: number; size: number; font: string }[]): T[] {
+  const t3 = glyphs.filter((g) => g.font === 'Type3' && g.ch.trim());
+  if (!t3.length) return images;
+  return images.filter((im) => {
+    const w = im.x1 - im.x0;
+    const h = im.y1 - im.y0;
+    const cx = (im.x0 + im.x1) / 2;
+    const cy = (im.y0 + im.y1) / 2;
+    return !t3.some(
+      (g) =>
+        h <= g.size * 1.6 &&
+        h >= g.size * 0.5 &&
+        w <= g.size * 1.6 &&
+        cy >= g.y - g.size && cy <= g.y + g.size * 0.3 &&
+        cx >= g.x - g.size * 0.5 && cx <= g.x + Math.max(g.w, g.size),
+    );
+  });
 }
 
 function rgbHex(a: number[]): string {

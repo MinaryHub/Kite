@@ -647,6 +647,18 @@ input[type='number'] {
 .hf-zone:hover {
   outline: 1px dashed #9db3dc;
 }
+/* 표·그림이 든 머리말/꼬리말: 본문과 같은 모양, 영역보다 조금 커도 자르지 않는다 (한글처럼) */
+.hf-zone.rich {
+  overflow: visible;
+  white-space: normal;
+}
+.hf-zone.rich .hf-rich {
+  width: 100%;
+  pointer-events: none;
+}
+.hf-rich {
+  --k-transparent-line: transparent;
+}
 .hf-zone.empty:hover::after {
   content: attr(data-hint);
   color: #9aa6ba;

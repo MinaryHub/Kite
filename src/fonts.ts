@@ -116,6 +116,8 @@ const FONT_ALIASES: Record<string, string[]> = {
   HY울릉도M: ['HYwulM'],
   HY엽서M: ['HYPost-Medium'],
   HY엽서L: ['HYPost-Light'],
+  // 한컴 자체 형식(HFT) 영문 글꼴이라 브라우저가 못 쓰는 것: 글자 폭이 같은 계열로 (한글에서 잰 폭이 Palatino 와 같다)
+  'HCI Poppy': ['Palatino Linotype', 'Book Antiqua', 'Palatino'],
 };
 
 /** 한컴 폴더에서 올릴 수 있는 글꼴이면 그 파일의 이름(별칭 포함) */
@@ -185,7 +187,12 @@ export function collectFontNames(doc: any): Set<string> {
   const out = new Set<string>();
   const walk = (n: any) => {
     if (!n || typeof n !== 'object') return;
-    for (const m of n.marks || []) if (m?.type === 'textStyle' && typeof m.attrs?.fontFamily === 'string') out.add(m.attrs.fontFamily.split(',')[0].replace(/['"]/g, '').trim());
+    for (const m of n.marks || []) {
+      if (m?.type !== 'textStyle') continue;
+      if (typeof m.attrs?.fontFamily === 'string') out.add(m.attrs.fontFamily.split(',')[0].replace(/['"]/g, '').trim());
+      const lf = m.attrs?.langFonts;
+      if (lf && typeof lf === 'object') for (const v of Object.values(lf)) if (typeof v === 'string' && v.trim()) out.add(v.trim());
+    }
     for (const c of n.content || []) walk(c);
   };
   walk(doc);

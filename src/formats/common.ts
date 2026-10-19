@@ -60,6 +60,8 @@ export function defaultSettings(): DocSettings {
 
 export const DEFAULT_FONT = '함초롬바탕';
 export const DEFAULT_FONT_SIZE = 10;
+/** 한글의 '고정폭 빈칸'(글자 크기의 1/4 폭, 양쪽 정렬로 늘어나지 않음)을 나타내는 글자: U+2005 FOUR-PER-EM SPACE */
+export const FIXED_SPACE = 0x2005;
 
 // ---------- 바이너리 ----------
 export function bytesToBase64(bytes: Uint8Array): string {

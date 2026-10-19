@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { app } from '../../app/controller';
 import { Modal, OkCancel, Fieldset, NumberInput, Seg } from '../widgets';
-import type { DocSettings, HFAlign, PageNumFormat, PageNumPos, PageSetup } from '../../types';
+import type { DocSettings, HeaderFooter, HFAlign, PageNumFormat, PageNumPos, PageSetup } from '../../types';
 import { formatPageNumber } from '../../formats/common';
 
 const PAPERS: { name: string; w: number; h: number }[] = [
@@ -168,7 +168,13 @@ export function HeaderFooterDialog({ onClose }: { onClose: () => void }) {
   const [h, setH] = useState({ ...tab.settings.header });
   const [f, setF] = useState({ ...tab.settings.footer });
   const apply = () => {
-    applySettings({ ...tab.settings, header: h, footer: f });
+    // 글자나 정렬을 고치면 한글에서 온 표·그림 모양(content) 대신 고친 글자를 쓴다
+    const keep = (v: HeaderFooter, old: HeaderFooter): HeaderFooter => {
+      if (v.text === old.text && v.align === old.align) return v;
+      const { content: _drop, ...rest } = v;
+      return rest;
+    };
+    applySettings({ ...tab.settings, header: keep(h, tab.settings.header), footer: keep(f, tab.settings.footer) });
     onClose();
   };
   return (

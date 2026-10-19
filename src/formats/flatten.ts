@@ -20,6 +20,16 @@ export interface CharStyle {
   letterSpacing: number;
   fontWidth: number;
   effect: string | null;
+  /** 한글 글꼴과 다른 언어별 글꼴 (한글 문서에서 온 것): 영문·한자·기호 */
+  langFonts?: { en?: string; hanja?: string; sym?: string } | null;
+}
+
+/** 언어 7개(한글·영문·한자·일어·기타·기호·사용자)의 글꼴 번호. font 는 글꼴 이름 → 번호 */
+export function langFontIds(c: CharStyle, font: (name: string) => number): number[] {
+  const base = font(c.font);
+  const lf = c.langFonts || {};
+  const id = (n?: string) => (n ? font(n) : base);
+  return [base, id(lf.en), id(lf.hanja), base, base, id(lf.sym), base];
 }
 
 export interface ParaStyle {
@@ -82,6 +92,8 @@ export interface FlatCell {
   borderCss: string | null;
   blocks: FlatBlock[];
   header: boolean;
+  /** 칸 자체 안 여백 [왼, 오른, 위, 아래] (px). 없으면 표 기본 */
+  marginsPx?: number[] | null;
 }
 
 export interface FlatTable {
@@ -94,6 +106,10 @@ export interface FlatTable {
   align: 'left' | 'center' | 'right';
   /** 셀 좌우 안 여백 (px) */
   cellPadPx: number;
+  /** 표 바깥 여백 [왼, 오른, 위, 아래] (px). 없으면 형식의 기본값 */
+  outMarginPx?: number[] | null;
+  /** 글자처럼 취급 (한글 문서에서 읽은 값) */
+  inline?: boolean;
   /** 줄 높이 (px, 최소 높이). 없으면 null */
   rowHeightsPx: (number | null)[];
 }
@@ -169,8 +185,15 @@ export function defaultPara(): ParaStyle {
   };
 }
 
+/** 칸 안 여백 값 정리: 유한한 0 이상 수 4개 */
+export function cleanMargins(v: any): number[] | null {
+  if (!Array.isArray(v) || v.length !== 4) return null;
+  const n = v.map((x) => +x);
+  return n.every((x) => isFinite(x) && x >= 0 && x < 500) ? n : null;
+}
+
 export function charKey(c: CharStyle): string {
-  return [c.font, c.size, c.color, +c.bold, +c.italic, +c.underline, +c.strike, +c.sup, +c.sub, c.highlight, c.letterSpacing, c.fontWidth, c.effect].join('|');
+  return [c.font, c.size, c.color, +c.bold, +c.italic, +c.underline, +c.strike, +c.sup, +c.sub, c.highlight, c.letterSpacing, c.fontWidth, c.effect, c.langFonts ? JSON.stringify(c.langFonts) : ''].join('|');
 }
 
 export function paraKey(p: ParaStyle): string {
@@ -217,7 +240,15 @@ function applyMarks(base: CharStyle, marks: JMark[] | undefined): { style: CharS
         break;
       case 'textStyle': {
         const a = m.attrs || {};
-        if (a.fontFamily) s.font = String(a.fontFamily).split(',')[0].replace(/['"]/g, '').trim();
+        if (a.fontFamily) {
+          s.font = String(a.fontFamily).split(',')[0].replace(/['"]/g, '').trim();
+          s.langFonts = null;
+        }
+        if (a.langFonts && typeof a.langFonts === 'object') {
+          const lf: Record<string, string> = {};
+          for (const k of ['en', 'hanja', 'sym']) if (typeof a.langFonts[k] === 'string' && a.langFonts[k].trim()) lf[k] = a.langFonts[k].trim();
+          s.langFonts = Object.keys(lf).length ? lf : null;
+        }
         if (a.fontSize) s.size = +a.fontSize;
         if (a.color) s.color = normalizeHex(a.color) || s.color;
         if (a.letterSpacing) s.letterSpacing = +a.letterSpacing;
@@ -498,6 +529,7 @@ function flattenTable(n: JNode, ctx: Ctx): FlatTable {
         borderCss: cell.attrs?.borderCss || null,
         blocks: flattenBlocks(cell.content || [], { ...ctx, indent: 0 }),
         header: cell.type === 'tableHeader',
+        marginsPx: cleanMargins(cell.attrs?.margins),
       };
       cellWidths.set(fc, cw);
       list.push(fc);
@@ -524,5 +556,5 @@ function flattenTable(n: JNode, ctx: Ctx): FlatTable {
   for (const row of cells) for (const cell of row) if (!cell.widthPx) cell.widthPx = colWidthsPx.slice(cell.col, cell.col + cell.colspan).reduce((a, b) => a + b, 0);
   const cellPadPx = n.attrs?.cellPadding != null ? +n.attrs.cellPadding : 6.8;
   const rowHeightsPx = rowsJ.map((r) => ((r.attrs?.height ?? 0) > 0 ? +r.attrs!.height : null));
-  return { kind: 'table', rows: rowsJ.length, cols: maxCols, colWidthsPx, cells, pageBreakBefore: false, align: n.attrs?.align || 'left', cellPadPx, rowHeightsPx };
+  return { kind: 'table', rows: rowsJ.length, cols: maxCols, colWidthsPx, cells, pageBreakBefore: false, align: n.attrs?.align || 'left', cellPadPx, rowHeightsPx, outMarginPx: cleanMargins(n.attrs?.outMargin), inline: n.attrs?.inline === true };
 }

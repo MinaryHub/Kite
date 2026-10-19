@@ -10,6 +10,7 @@ import type { Node as PMNode } from '@tiptap/pm/model';
 import { NodeSelection, Plugin, PluginKey, TextSelection, type Transaction } from '@tiptap/pm/state';
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import { viewState } from '../viewState';
+import { cleanMargins } from '../../formats/flatten';
 import { normColor } from '../../formats/common';
 
 declare module '@tiptap/core' {
@@ -453,6 +454,21 @@ const cellAttrs = {
       return { 'data-border-css': a.borderCss, style };
     },
   },
+  /** 칸 자체 안 여백 [왼, 오른, 위, 아래] (px) — 한글 문서의 '칸 여백 지정'. 없으면 표 기본 */
+  margins: {
+    default: null,
+    parseHTML: (el: HTMLElement) => {
+      try {
+        return cleanMargins(JSON.parse(el.getAttribute('data-cm') || 'null'));
+      } catch {
+        return null;
+      }
+    },
+    renderHTML: (a: Record<string, any>) => {
+      const v = cleanMargins(a.margins);
+      return v ? { 'data-cm': JSON.stringify(v), style: `--cm-l: ${v[0]}px; --cm-r: ${v[1]}px; --cm-t: ${v[2]}px; --cm-b: ${v[3]}px` } : {};
+    },
+  },
   borderStyle: {
     default: null,
     parseHTML: (el: HTMLElement) => el.getAttribute('data-border') || null,
@@ -461,6 +477,7 @@ const cellAttrs = {
   /**
    * 칸에 걸친 그림 (PDF 의 직인 등 표 위에 겹친 그림): [{ src, x, y, w, h }] — 칸 왼쪽 위 기준 pt.
    * 편집기에 떠 있는 개체가 없어서 겹친 칸마다 배경 그림으로 그 부분을 깐다.
+   * 한글의 칸 그림 채우기는 { src, fit } — fit: stretch(칸 크기에 맞춤) · tile(바둑판) · center(가운데).
    */
   bgImages: {
     default: null,
@@ -479,9 +496,9 @@ const cellAttrs = {
       // 그림 주소는 style 합치기에서 ';'·':' 가 잘리므로 스타일시트 규칙(data-bg-key)으로 넣는다
       const key = bgRuleFor(list.map((b) => b.src));
       const style = [
-        `background-position: ${list.map((b) => `${b.x}pt ${b.y}pt`).join(', ')}`,
-        `background-size: ${list.map((b) => `${b.w}pt ${b.h}pt`).join(', ')}`,
-        'background-repeat: no-repeat',
+        `background-position: ${list.map((b) => (b.fit === 'center' ? 'center' : b.fit ? '0 0' : `${b.x}pt ${b.y}pt`)).join(', ')}`,
+        `background-size: ${list.map((b) => (b.fit === 'stretch' ? '100% 100%' : b.fit ? 'auto' : `${b.w}pt ${b.h}pt`)).join(', ')}`,
+        `background-repeat: ${list.map((b) => (b.fit === 'tile' ? 'repeat' : 'no-repeat')).join(', ')}`,
         'background-origin: border-box',
       ].join('; ');
       return { 'data-bg-images': JSON.stringify(list), 'data-bg-key': key, style };
@@ -530,14 +547,20 @@ function bgRuleFor(srcs: string[]): string {
 }
 
 /** 칸 배경 그림 목록: data:image 주소와 유한한 수만 남긴다 (문서에서 온 값이므로) */
-function cleanBgImages(v: any): { src: string; x: number; y: number; w: number; h: number }[] | null {
+type BgImage = { src: string; x: number; y: number; w: number; h: number; fit?: 'stretch' | 'tile' | 'center' };
+function cleanBgImages(v: any): BgImage[] | null {
   if (!Array.isArray(v)) return null;
   const num = (n: any) => (typeof n === 'number' && isFinite(n) ? Math.round(n * 10) / 10 : null);
+  const FITS = ['stretch', 'tile', 'center'];
   const out = v
     .slice(0, 8)
-    .map((b: any) => ({ src: b?.src, x: num(b?.x), y: num(b?.y), w: num(b?.w), h: num(b?.h) }))
+    .map((b: any) => {
+      const fit = FITS.includes(b?.fit) ? b.fit : undefined;
+      // 맞춤 방식이 있으면 위치·크기는 칸이 정한다
+      return fit ? { src: b?.src, x: 0, y: 0, w: 1, h: 1, fit } : { src: b?.src, x: num(b?.x), y: num(b?.y), w: num(b?.w), h: num(b?.h) };
+    })
     .filter((b: any) => typeof b.src === 'string' && /^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+$/.test(b.src) && b.x != null && b.y != null && b.w != null && b.w > 0 && b.h != null && b.h > 0);
-  return out.length ? (out as { src: string; x: number; y: number; w: number; h: number }[]) : null;
+  return out.length ? (out as BgImage[]) : null;
 }
 
 export const KTableCell = TableCell.extend({
@@ -557,7 +580,7 @@ export const KTableRow = TableRow.extend({
           const v = parseFloat(el.style.height);
           return v > 0 ? v : null;
         },
-        renderHTML: (a: Record<string, any>) => (a.height ? { style: `height: ${a.height}px` } : {}),
+        renderHTML: (a: Record<string, any>) => (a.height ? { style: `height: ${a.height}px; --row-h: ${a.height}px` } : {}),
       },
     };
   },
@@ -601,6 +624,8 @@ class KTableView extends TableView {
     const t = this.table as HTMLTableElement;
     if (node.attrs.borderless) t.setAttribute('data-borderless', 'true');
     else t.removeAttribute('data-borderless');
+    if (node.attrs.tight) t.setAttribute('data-tight', 'true');
+    else t.removeAttribute('data-tight');
     if (node.attrs.cellPadding != null) t.style.setProperty('--cell-px', node.attrs.cellPadding + 'px');
     else t.style.removeProperty('--cell-px');
     const align = node.attrs.align;
@@ -631,10 +656,37 @@ export const KTable = Table.extend({
   addAttributes() {
     return {
       ...this.parent?.(),
+      /** 글자처럼 취급 (한글 문서에서 읽은 값; 저장할 때 되돌린다) */
+      inline: {
+        default: false,
+        parseHTML: (el: HTMLElement) => el.getAttribute('data-inline') === 'true',
+        renderHTML: (a: Record<string, any>) => (a.inline ? { 'data-inline': 'true' } : {}),
+      },
+      /** 표 바깥 여백 [왼, 오른, 위, 아래] (px) — 한글 문서에서 읽은 값을 저장할 때 되돌리려고 둔다 */
+      outMargin: {
+        default: null,
+        parseHTML: (el: HTMLElement) => {
+          try {
+            return cleanMargins(JSON.parse(el.getAttribute('data-out-margin') || 'null'));
+          } catch {
+            return null;
+          }
+        },
+        renderHTML: (a: Record<string, any>) => {
+          const v = cleanMargins(a.outMargin);
+          return v ? { 'data-out-margin': JSON.stringify(v) } : {};
+        },
+      },
       borderless: {
         default: false,
         parseHTML: (el: HTMLElement) => el.getAttribute('data-borderless') === 'true',
         renderHTML: (a: Record<string, any>) => (a.borderless ? { 'data-borderless': 'true' } : {}),
+      },
+      /** 칸 위아래 안 여백 없음 (PDF 에서 나란한 상자들을 담는 배치용 표) */
+      tight: {
+        default: false,
+        parseHTML: (el: HTMLElement) => el.getAttribute('data-tight') === 'true',
+        renderHTML: (a: Record<string, any>) => (a.tight ? { 'data-tight': 'true' } : {}),
       },
       /** 셀 왼쪽/오른쪽 안 여백 (px) */
       cellPadding: {

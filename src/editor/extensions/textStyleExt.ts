@@ -61,6 +61,18 @@ export const TextStyleExt = Extension.create({
                 ? { 'data-font-width': a.fontWidth, style: `font-stretch: ${Math.max(50, Math.min(200, a.fontWidth))}%` }
                 : {},
           },
+          /**
+           * 언어별 글꼴 (한글 문서): { en?: 영문, hanja?: 한자, sym?: 기호 } — 한글 글꼴(fontFamily)과 다른 것만.
+           * 화면에서는 hwpMetrics 가 그 언어의 글자 묶음에 글꼴을 입힌다.
+           */
+          langFonts: {
+            default: null,
+            parseHTML: (el: HTMLElement) => cleanLangFonts(safeJson(el.getAttribute('data-lang-fonts'))),
+            renderHTML: (a: Record<string, any>) => {
+              const v = cleanLangFonts(a.langFonts);
+              return v ? { 'data-lang-fonts': JSON.stringify(v) } : {};
+            },
+          },
           /** 외곽선/그림자/양각/음각 */
           textEffect: {
             default: null,
@@ -116,6 +128,22 @@ export const TextStyleExt = Extension.create({
     };
   },
 });
+
+function safeJson(s: string | null): any {
+  try {
+    return s ? JSON.parse(s) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 언어별 글꼴 값 정리: 알려진 키의 짧은 글꼴 이름만 */
+export function cleanLangFonts(v: any): { en?: string; hanja?: string; sym?: string } | null {
+  if (!v || typeof v !== 'object') return null;
+  const out: Record<string, string> = {};
+  for (const k of ['en', 'hanja', 'sym']) if (typeof v[k] === 'string' && v[k].trim() && v[k].length <= 80) out[k] = v[k].trim();
+  return Object.keys(out).length ? out : null;
+}
 
 function paragraphFontSize(editor: any): number | null {
   const { $from } = editor.state.selection;

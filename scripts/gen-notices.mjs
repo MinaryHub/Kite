@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const root = path.resolve(import.meta.dirname, '..');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const BUILD_ONLY = /^(@types\/|typescript$|vite$|esbuild$|electron-builder$|jsdom$|@vitejs\/)/;
 const roots = [...Object.keys(pkg.dependencies || {}), ...Object.keys(pkg.devDependencies || {})].filter((n) => !BUILD_ONLY.test(n));

@@ -1439,7 +1439,47 @@ type Item =
 const BULLET_RE = /^[\s]*([○●◦•·∙ㆍ\-–—□■◇◆▪▫▶▷►※*☐☑✓✔❍❏➢➤>]|\(?\d{1,2}[.)]|\(?[가-힣][.)]\s|[①-⑳]|[ⅰ-ⅹⅠ-Ⅹ][.)]?)/;
 
 /** 그릇 하나의 내용을 블록 목록으로 */
+/**
+ * 표·상자 바로 옆(같은 높이)에 놓인 글줄을 테두리 없는 상자로 바꾼다. 그러면 표·상자와 한 줄에 나란히
+ * 놓인다 (번호 상자 옆의 제목, 머리 상자 옆의 날짜 등). 그대로 두면 위아래 두 줄로 갈라져 쪽이 넘친다.
+ */
+function besideBoxes(c: Container, underlined: Set<Glyph>): Container {
+  if (!c.children.length || !c.glyphs.length) return c;
+  const lines = buildLines(c.glyphs, underlined);
+  const used = new Set<Glyph>();
+  const extra: BoxModel[] = [];
+  for (const ch of c.children) {
+    for (const side of ['r', 'l'] as const) {
+      const ls = lines.filter((l) => {
+        if (l.glyphs.some((g) => used.has(g))) return false;
+        // 줄의 가운데 높이가 표·상자 안에 있고, 표·상자가 줄보다 그리 높지 않을 때 (한두 줄짜리 머리 상자)
+        const mid = l.y - l.size * 0.35;
+        if (mid < ch.y0 || mid > ch.y1 || ch.y1 - ch.y0 > l.size * 3.5) return false;
+        return side === 'r' ? l.x0 >= ch.x1 - 0.5 : l.x1 <= ch.x0 + 0.5;
+      });
+      if (!ls.length || ls.length > 2) continue;
+      const gx0 = Math.min(...ls.map((l) => l.x0));
+      const gx1 = Math.max(...ls.map((l) => l.x1));
+      const b: Box = {
+        x0: side === 'r' ? Math.max(ch.x1 + 0.1, gx0 - 1) : gx0 - 1,
+        x1: side === 'r' ? gx1 + 1 : Math.min(ch.x0 - 0.1, gx1 + 1),
+        // 세로 범위는 옆 표·상자와 같게 (다르면 나란히 놓을 때 위 맞춤용 빈 줄이 끼어 줄이 높아진다)
+        y0: ch.y0,
+        y1: ch.y1,
+      };
+      if (b.x1 - b.x0 < 2) continue;
+      const inner = newContainer('box', b, null);
+      for (const l of ls) for (const g of l.glyphs) used.add(g);
+      inner.glyphs = c.glyphs.filter((g) => used.has(g) && ls.some((l) => l.glyphs.includes(g)));
+      extra.push({ type: 'box', ...b, inner });
+    }
+  }
+  if (!extra.length) return c;
+  return { ...c, glyphs: c.glyphs.filter((g) => !used.has(g)), children: [...c.children, ...extra] };
+}
+
 export async function renderContainer(c: Container, bounds: Box, ctx: LayoutCtx, underlined: Set<Glyph>, startY: number): Promise<{ blocks: JNode[]; endY: number }> {
+  c = besideBoxes(c, underlined);
   const lines = buildLines(c.glyphs, underlined);
   // 글줄 안의 작은 그림은 그 줄에 끼운다 (글자처럼 자리에 맞춰 넣는다)
   const restImages: PdfImage[] = [];
@@ -1530,7 +1570,7 @@ export async function renderContainer(c: Container, bounds: Box, ctx: LayoutCtx,
   // 문단 묶기
   type Para = { lines: TLine[]; pitch: number | null };
   let para: Para | null = null;
-  const flushPara = () => {
+  const flushPara = (nextTop?: number) => {
     if (!para) return;
     const p = para;
     para = null;
@@ -1541,11 +1581,15 @@ export async function renderContainer(c: Container, bounds: Box, ctx: LayoutCtx,
     if (p.pitch == null) {
       const ng = nextGap.get(last);
       if (ng != null) lh = Math.max(size * 1.05, Math.min(lh, ng));
+      // 바로 아래 표·상자·그림의 위끝을 넘지 않게 (넘으면 그만큼 뒤 내용이 밀려 쪽이 넘친다)
+      if (nextTop != null) lh = Math.max(size * 1.05, Math.min(lh, 2 * (nextTop - first.y + size * 0.38)));
+      // 줄 상자가 앞 내용과 겹치면 아래로 밀지 말고 줄 높이를 줄인다 (기준선은 PDF 자리 그대로; 밀면 쪽 끝까지 쌓인다)
+      if (p.lines.length === 1 && first.y - ascentOff(lh, size) < prevBottom - 0.3) lh = Math.max(size * 1.05, Math.min(lh, 2 * (first.y - size * 0.38 - prevBottom)));
     }
     // 셀: 행 높이를 넘지 않도록 줄 간격을 줄인다
     if (c.kind === 'cell' || c.kind === 'box') {
       const avail = (c.y1 - c.y0 - 2 * CELL_PADV) / p.lines.length;
-      if (lh > avail) lh = Math.max(size * 1.05, avail);
+      if (lh > avail) lh = Math.max(size, avail);
     }
     const attrs: Record<string, any> = {};
     const firstX = first.x0 - L;
@@ -1625,7 +1669,7 @@ export async function renderContainer(c: Container, bounds: Box, ctx: LayoutCtx,
       para = { lines: [l], pitch: null };
       continue;
     }
-    flushPara();
+    flushPara(it.top);
     if (it.kind === 'rule') {
       // 구분선: 선 두께만한 빈 문단에 배경색 (들여쓰기로 선의 시작/끝을 맞춘다)
       const r = it.r;
@@ -1672,7 +1716,8 @@ export async function renderContainer(c: Container, bounds: Box, ctx: LayoutCtx,
       const node = paragraph(attrs, content);
       blocks.push(node);
       prevBlock = node;
-      prevBottom = Math.max(y0, prevBottom) + (y1 - y0) * scale;
+      // 줄 높이(그림 + 2pt)만큼 차지한다 — 모델이 실제보다 작으면 그림마다 뒤 내용이 밀린다
+      prevBottom = Math.max(y0, prevBottom) + (y1 - y0) * scale + 2;
       continue;
     }
     if (it.kind === 'row') {
@@ -1746,7 +1791,8 @@ async function renderSideBySide(group: (TableModel | BoxModel)[], L: number, R: 
     content.push(node);
     cells.push({ type: 'tableCell', attrs: { colspan: 1, rowspan: 1, colwidth: [Math.max(4, Math.round((right - ch.x0) * PT2PX))], borderStyle: 'l r t b', verticalAlign: 'top' }, content });
   }
-  const tAttrs: Record<string, any> = { cellPadding: 0 };
+  // 배치용 표: 칸 안 여백이 없어야 나란한 상자들의 높이가 PDF 와 같다
+  const tAttrs: Record<string, any> = { cellPadding: 0, tight: true };
   const W = R - L;
   const gx1 = g[g.length - 1].x1;
   if (Math.abs((x0 + gx1) / 2 - (L + R) / 2) < 8 && gx1 - x0 < W - 10) tAttrs.align = 'center';

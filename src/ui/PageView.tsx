@@ -3,13 +3,14 @@ import { EditorContent } from '@tiptap/react';
 import { TextSelection } from '@tiptap/pm/state';
 import type { DocTab } from '../doc/docTab';
 import { useApp } from '../app/hooks';
-import { computeGeom, hfText, hfZones, PAGE_GAP, pageBackgroundStyle, type PageGeom } from '../print';
+import { computeGeom, hfText, hfZones, PAGE_GAP, pageBackgroundStyle, repeatHeadsHtml, type PageGeom } from '../print';
 import { formatPageNumber, splitExt } from '../formats/common';
 import { applyFormatPainter, insertImagesFromFiles } from '../app/commands';
 import { viewState } from '../editor/viewState';
 import { FN_FONT_PX, FN_LINE, FN_SEP } from '../editor/extensions/pagination';
 import { showContextMenu } from './ContextMenu';
 import { platform } from '../platform';
+import { hfRichHtml } from '../hfRich';
 
 export function PageView({ tab, active, hidden = false }: { tab: DocTab; active: boolean; hidden?: boolean }) {
   const app = useApp();
@@ -178,24 +179,28 @@ export function PageView({ tab, active, hidden = false }: { tab: DocTab; active:
       width: g.contentW,
       justifyContent: align === 'left' ? 'flex-start' : align === 'right' ? 'flex-end' : 'center',
     });
+    // 표·그림이 든 머리말/꼬리말은 한글처럼 영역 위쪽부터 모양 그대로 그린다
+    const hRich = hfRichHtml(s.header);
+    const fRich = hfRichHtml(s.footer);
+    const rich = (html: string) => <div className="kdoc-content hf-rich" dangerouslySetInnerHTML={{ __html: hfText(html, num, total, s.pageNumber.format) }} />;
     chrome.push(
       <div
         key={'h' + k}
-        className={'hf-zone' + (s.header.text ? '' : ' empty')}
+        className={'hf-zone' + (s.header.text || hRich ? '' : ' empty') + (hRich ? ' rich' : '')}
         data-hint="머리말 (두 번 누르면 편집)"
         style={{ ...hfStyle(s.header.align), top: top + z.header.top, height: z.header.height, alignItems: 'flex-start' }}
         onDoubleClick={() => app.openDialog('headerFooter', { tab: 'header' })}
       >
-        {s.header.text ? hfText(s.header.text, num, total, s.pageNumber.format) : ''}
+        {hRich ? rich(hRich) : s.header.text ? hfText(s.header.text, num, total, s.pageNumber.format) : ''}
       </div>,
       <div
         key={'f' + k}
-        className={'hf-zone' + (s.footer.text ? '' : ' empty')}
+        className={'hf-zone' + (s.footer.text || fRich ? '' : ' empty') + (fRich ? ' rich' : '')}
         data-hint="꼬리말 (두 번 누르면 편집)"
-        style={{ ...hfStyle(s.footer.align), top: top + z.footer.top, height: z.footer.height, alignItems: 'flex-end' }}
+        style={{ ...hfStyle(s.footer.align), top: top + z.footer.top, height: z.footer.height, alignItems: fRich ? 'flex-start' : 'flex-end' }}
         onDoubleClick={() => app.openDialog('headerFooter', { tab: 'footer' })}
       >
-        {s.footer.text ? hfText(s.footer.text, num, total, s.pageNumber.format) : ''}
+        {fRich ? rich(fRich) : s.footer.text ? hfText(s.footer.text, num, total, s.pageNumber.format) : ''}
       </div>,
     );
     if (s.pageNumber.pos !== 'none') {
@@ -219,6 +224,10 @@ export function PageView({ tab, active, hidden = false }: { tab: DocTab; active:
         </div>,
       );
     }
+    // 표가 이어지는 쪽 맨 위의 제목 줄 (쪽 나누기가 비워 둔 자리)
+    if (tab.layout.repeats?.some((r) => r.page === k)) {
+      chrome.push(<div key={'rh' + k} className="pg-repeat-layer" style={{ position: 'absolute', left: 0, top, width: g.W, height: g.H, pointerEvents: 'none' }} dangerouslySetInnerHTML={{ __html: repeatHeadsHtml(tab, g, k) }} />);
+    }
     const fns = tab.layout.footnotes.filter((f) => f.page === k);
     if (fns.length) {
       chrome.push(
@@ -241,7 +250,7 @@ export function PageView({ tab, active, hidden = false }: { tab: DocTab; active:
 
   return (
     <div
-      className={'workspace' + (active ? '' : ' hidden-doc') + (hidden ? ' mp-hidden' : '') + (tab.settings.fixedLines ? ' fixed-lines' : '')}
+      className={'workspace' + (active ? '' : ' hidden-doc') + (hidden ? ' mp-hidden' : '') + (tab.settings.fixedLines ? ' fixed-lines' : '') + (tab.settings.hwpMetrics ? ' hwp-metrics' : '')}
       data-doc={tab.id}
       ref={wsRef}
       onWheel={onWheel}

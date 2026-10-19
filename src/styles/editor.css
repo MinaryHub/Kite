@@ -177,10 +177,15 @@
   table-layout: fixed;
   margin: 0;
 }
+/* 칸 자체 안 여백(--cm-*)은 그 칸에만: 안에 든 표로 이어지지 않게 상속을 끈다 */
+@property --cm-l { syntax: '*'; inherits: false; }
+@property --cm-r { syntax: '*'; inherits: false; }
+@property --cm-t { syntax: '*'; inherits: false; }
+@property --cm-b { syntax: '*'; inherits: false; }
 .kdoc-content td,
 .kdoc-content th {
   border: 1px solid #000;
-  padding: 0.5mm var(--cell-px, 1.8mm);
+  padding: var(--cm-t, 0.5mm) var(--cm-r, var(--cell-px, 1.8mm)) var(--cm-b, 0.5mm) var(--cm-l, var(--cell-px, 1.8mm));
   vertical-align: middle;
   position: relative;
   box-sizing: border-box;
@@ -208,6 +213,11 @@
 .kdoc-content td[data-border~='r'], .kdoc-content th[data-border~='r'] { border-right: 1px dotted var(--k-transparent-line, #c9c9f4); }
 .kdoc-content td[data-border~='t'], .kdoc-content th[data-border~='t'] { border-top: 1px dotted var(--k-transparent-line, #c9c9f4); }
 .kdoc-content td[data-border~='b'], .kdoc-content th[data-border~='b'] { border-bottom: 1px dotted var(--k-transparent-line, #c9c9f4); }
+.kdoc-content table[data-tight='true'] > tbody > tr > td,
+.kdoc-content table[data-tight='true'] > tbody > tr > th {
+  padding-top: 0;
+  padding-bottom: 0;
+}
 .kdoc-content table[data-borderless='true'] td,
 .kdoc-content table[data-borderless='true'] th {
   border: 1px dotted var(--k-transparent-line, #c9c9f4);
@@ -342,9 +352,17 @@
 .kdoc-content .pg-spacer.pg-measuring {
   display: none !important;
 }
+/* 민 줄의 최소 높이도 민 만큼 늘린다 (아니면 최소 높이의 남는 공간이 민 거리를 삼켜 쪽 나누기 계산이 어긋난다) */
+.kdoc-content tr.pg-push-row {
+  height: calc(var(--row-h, 0px) + var(--pg-push)) !important;
+}
+.kdoc-content.pg-measuring tr.pg-push-row,
+.kdoc-content .pg-measuring tr.pg-push-row {
+  height: var(--row-h, auto) !important;
+}
 .kdoc-content tr.pg-push-row > td,
 .kdoc-content tr.pg-push-row > th {
-  padding-top: calc(var(--pg-push) + 0.5mm);
+  padding-top: calc(var(--pg-push) + var(--cm-t, 0.5mm));
   /* 다음 쪽에서 이어지는 줄의 위쪽 선 */
   background-image: linear-gradient(#000, #000);
   background-size: 100% 1px;
@@ -359,7 +377,7 @@
 .kdoc-content.pg-measuring tr.pg-push-row > th,
 .kdoc-content .pg-measuring tr.pg-push-row > td,
 .kdoc-content .pg-measuring tr.pg-push-row > th {
-  padding-top: 0.5mm;
+  padding-top: var(--cm-t, 0.5mm);
   background-image: none;
 }
 
@@ -555,14 +573,33 @@
 
 /* 줄 높이 고정 (PDF 에서 불러온 문서): 글자 조각은 줄 상자 높이에 관여하지 않고 문단 줄 간격만 쓴다.
    글꼴마다 위아래 높이가 달라 글꼴이 섞인 줄이 조금씩 높아지는 것을 막는다 (PDF 는 줄 위치가 고정) */
-.workspace.fixed-lines .ProseMirror span {
+:is(.workspace.fixed-lines .ProseMirror, .kdoc-content.fixed-lines) span {
   line-height: 0;
+}
+/* 한글 문서: 줄 높이 = 문단의 글자 크기(가장 큰 글자, hwpMetrics 가 맞춤) × 줄 간격. 한글처럼 글꼴마다 다른
+   위아래 높이(ascent/descent)로 줄이 벌어지지 않게 글자 꾸밈 요소는 줄 높이에 관여하지 않는다 (수식 제외) */
+:is(.workspace.hwp-metrics .ProseMirror, .kdoc-content.hwp-metrics) :is(span, strong, b, em, i, u, s, mark, a, sub, sup):not(.katex, .katex *) {
+  line-height: 0;
+}
+/* 한글 문서의 제목 칸은 모양이 보통 칸과 같다 (바탕색은 칸 속성으로 따로 칠한다) */
+:is(.workspace.hwp-metrics .ProseMirror, .kdoc-content.hwp-metrics) th {
+  background: transparent;
+}
+/* 한글은 칸 테두리 두께를 글자 영역에서 빼지 않는다 (글자 폭 = 칸 너비 - 안 여백). 겹친 테두리의 절반만큼 안 여백을 줄여 맞춘다 */
+:is(.workspace.hwp-metrics .ProseMirror, .kdoc-content.hwp-metrics) :is(td, th) {
+  padding-left: max(0px, calc(var(--cm-l, var(--cell-px, 1.8mm)) - 0.75px));
+  padding-right: max(0px, calc(var(--cm-r, var(--cell-px, 1.8mm)) - 0.75px));
 }
 /* 줄 높이 고정 문서(PDF)의 그림은 PDF 크기 그대로: 내어쓰기(음수 text-indent)가 있는 줄에서
    max-width: 100% 가 그림을 아주 좁게 줄이는 일이 있다 */
-.workspace.fixed-lines .k-image,
-.workspace.fixed-lines .k-image img {
+:is(.workspace.fixed-lines, .kdoc-content.fixed-lines) .k-image,
+:is(.workspace.fixed-lines, .kdoc-content.fixed-lines) .k-image img {
   max-width: none;
+}
+/* 그림이 든 줄은 자동으로 줄을 바꾸지 않는다: 줄바꿈 자리는 PDF 가 정했고, 칸이 그림보다 조금 좁으면 그림이
+   다음 줄로 밀려 표 줄이 몇 배로 높아진다 */
+:is(.workspace.fixed-lines .ProseMirror, .kdoc-content.fixed-lines) p:has(> .k-image) {
+  white-space: nowrap;
 }
 
 /* 문서 검사 밑줄 (화면에만) */

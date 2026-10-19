@@ -34,6 +34,7 @@ import {
   applyNumFormat,
   assertZipBudget,
   readZipEntry,
+  FIXED_SPACE,
 } from '../common';
 
 // ---------------- 헤더(스타일 정의) ----------------
@@ -51,6 +52,19 @@ export interface CharPr {
   letterSpacing?: number;
   fontWidth?: number;
   textEffect?: string | null;
+  /** 한글 글꼴과 다른 언어별 글꼴 (영문·한자·기호) */
+  langFonts?: LangFonts;
+}
+
+export type LangFonts = { en?: string; hanja?: string; sym?: string };
+
+/** 한글 글꼴과 다른 것만 담은 언어별 글꼴 (없으면 undefined) */
+export function langFontsOf(base: string | undefined, en?: string, hanja?: string, sym?: string): LangFonts | undefined {
+  const out: LangFonts = {};
+  if (en && en !== base) out.en = en;
+  if (hanja && hanja !== base) out.hanja = hanja;
+  if (sym && sym !== base) out.sym = sym;
+  return Object.keys(out).length ? out : undefined;
 }
 
 export interface ParaPr {
@@ -76,6 +90,15 @@ export interface BorderFill {
   noBorders: string[];
   /** 기본과 다른 선 (굵기/색/종류) */
   css?: string | null;
+  /** 그림 채우기: 그림 id (HWP 는 BinData 번호, HWPX 는 binaryItemIDRef) 와 채우는 방식 (TOTAL, TILE, CENTER …) */
+  img?: { id: string; mode: string } | null;
+}
+
+/** 그림 채우기 방식 → 칸 배경 그림의 맞춤 */
+export function imgFillFit(mode: string): 'stretch' | 'tile' | 'center' {
+  if (mode === 'TOTAL' || mode === 'ZOOM') return 'stretch';
+  if (mode.startsWith('TILE')) return 'tile';
+  return 'center';
 }
 
 export interface Numbering {
@@ -136,6 +159,13 @@ export function parseHeader(doc: Document): HeaderInfo {
   for (const f of kids(hangul, 'font')) info.fonts.set(attr(f, 'id') || '0', attr(f, 'face') || '');
   const latinFonts = new Map<string, string>();
   for (const f of kids(latin, 'font')) latinFonts.set(attr(f, 'id') || '0', attr(f, 'face') || '');
+  const langMap = (lang: string) => {
+    const m = new Map<string, string>();
+    for (const f of kids(faces.find((x) => attr(x, 'lang') === lang) || null, 'font')) m.set(attr(f, 'id') || '0', attr(f, 'face') || '');
+    return m;
+  };
+  const hanjaFonts = langMap('HANJA');
+  const symbolFonts = langMap('SYMBOL');
 
   for (const bf of descendants(doc, 'borderFill')) {
     const id = attr(bf, 'id') || '';
@@ -164,7 +194,9 @@ export function parseHeader(doc: Document): HeaderInfo {
       if (!b || attr(b, 'type') === 'NONE') noBorders.push(s);
       else det[s] = { w: parseFloat(attr(b, 'width') || '0.12') || 0.12, c: normColor(attr(b, 'color')) || '#000000', s: hwpxBorderStyle(attr(b, 'type') || 'SOLID') };
     }
-    info.borderFills.set(id, { bg, noBorders, css: borderCss(det) });
+    const ib = descendant(bf, 'imgBrush');
+    const imgRef = ib ? attr(kid(ib, 'img'), 'binaryItemIDRef') : null;
+    info.borderFills.set(id, { bg, noBorders, css: borderCss(det), img: ib && imgRef ? { id: imgRef, mode: attr(ib, 'mode') || 'TOTAL' } : null });
   }
 
   for (const cp of descendants(doc, 'charPr')) {
@@ -186,8 +218,14 @@ export function parseHeader(doc: Document): HeaderInfo {
     if (kid(cp, 'emboss')) effect = 'emboss';
     if (kid(cp, 'engrave')) effect = 'engrave';
     const stShape = attr(st, 'shape');
+    const fontFamily = info.fonts.get(hangulId) || (latinId ? latinFonts.get(latinId) : undefined);
+    const ref = (k: string, m: Map<string, string>) => {
+      const v = attr(fontRef, k);
+      return v != null ? m.get(v) || undefined : undefined;
+    };
     info.charPrs.set(id, {
-      fontFamily: info.fonts.get(hangulId) || (latinId ? latinFonts.get(latinId) : undefined),
+      fontFamily,
+      langFonts: langFontsOf(fontFamily, ref('latin', latinFonts), ref('hanja', hanjaFonts), ref('symbol', symbolFonts)),
       fontSize: round((numAttr(cp, 'height', 1000) / 100) * (relSz / 100), 1),
       color: normColor(attr(cp, 'textColor')),
       bold: !!kid(cp, 'bold'),
@@ -283,6 +321,7 @@ export function charMarks(cp: CharPr | undefined, link?: string | null, highligh
   if (cp.letterSpacing) ts.letterSpacing = cp.letterSpacing;
   if (cp.fontWidth) ts.fontWidth = cp.fontWidth;
   if (cp.textEffect) ts.textEffect = cp.textEffect;
+  if (cp.langFonts) ts.langFonts = cp.langFonts;
   if (Object.keys(ts).length) marks.push({ type: 'textStyle', attrs: ts });
   if (cp.bold) marks.push({ type: 'bold' });
   if (cp.italic) marks.push({ type: 'italic' });
@@ -470,7 +509,7 @@ export class HwpxConverter {
           push(' ');
           break;
         case 'fwSpace':
-          push('　');
+          push(String.fromCharCode(FIXED_SPACE));
           break;
         case 'hyphen':
           push('-');
@@ -706,11 +745,17 @@ export class HwpxConverter {
         const va = attr(sub, 'vertAlign');
         const attrs: Record<string, any> = { colspan: cs, rowspan: rs, colwidth: null };
         if (bf?.bg) attrs.backgroundColor = bf.bg;
+        const fillSrc = bf?.img ? this.images.get(bf.img.id) : null;
+        if (fillSrc && bf?.img) attrs.bgImages = [{ src: fillSrc, fit: imgFillFit(bf.img.mode) }];
         if (bf && bf.noBorders.length) attrs.borderStyle = bf.noBorders.join(' ');
         if (bf?.css) attrs.borderCss = bf.css;
         if (va === 'TOP') attrs.verticalAlign = 'top';
         else if (va === 'BOTTOM') attrs.verticalAlign = 'bottom';
-        cells.push({ row, col, cs, rs, w, node: { type: 'tableCell', attrs, content } });
+        const cm = kid(tc, 'cellMargin');
+        if (attr(tc, 'hasMargin') === '1' && cm) attrs.margins = ['left', 'right', 'top', 'bottom'].map((k) => Math.round(hwpToPx(numAttr(cm, k, 0)) * 10) / 10);
+        // 제목 칸이고 표가 제목 줄을 되풀이하면 제목 칸으로 (쪽이 바뀌면 되풀이된다)
+        const head = attr(tbl, 'repeatHeader') === '1' && attr(tc, 'header') === '1';
+        cells.push({ row, col, cs, rs, w, node: { type: head ? 'tableHeader' : 'tableCell', attrs, content } });
       });
     });
     const t = assembleTable(cells, rowCnt, numAttr(tbl, 'colCnt', 0), hwpToPx(numAttr(kid(tbl, 'sz'), 'width', 0)), rowH);
@@ -718,6 +763,9 @@ export class HwpxConverter {
     const inM = kid(tbl, 'inMargin');
     const tAttrs: Record<string, any> = {};
     if (inM) tAttrs.cellPadding = Math.round(hwpToPx((numAttr(inM, 'left', 510) + numAttr(inM, 'right', 510)) / 2) * 10) / 10;
+    if (attr(kid(tbl, 'pos'), 'treatAsChar') === '1') tAttrs.inline = true;
+    const outM = kid(tbl, 'outMargin');
+    if (outM) tAttrs.outMargin = ['left', 'right', 'top', 'bottom'].map((k) => Math.round(hwpToPx(numAttr(outM, k, 283)) * 10) / 10);
     return { type: 'table', attrs: tAttrs, content: rows };
   }
 }
@@ -795,6 +843,7 @@ export async function readHwpx(data: Uint8Array): Promise<LoadedDoc> {
       .sort((a, b) => parseInt(a.replace(/\D/g, ''), 10) - parseInt(b.replace(/\D/g, ''), 10));
   }
   const settings = defaultSettings();
+  settings.hwpMetrics = true;
   const conv = new HwpxConverter(header, images, settings, warnings);
   const blocks: JNode[] = [];
   for (let i = 0; i < sectionPaths.length; i++) {
