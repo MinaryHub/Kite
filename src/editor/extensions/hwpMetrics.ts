@@ -200,6 +200,17 @@ function changedRange(tr: Transaction): [number, number] | null {
       f = Math.min(f, rest.map(ns, -1));
       t = Math.max(t, rest.map(ne, 1));
     });
+    // 서식(자간·장평·글자 크기 등)이나 문단 속성만 바꾼 단계는 위치가 그대로라 맵이 비어 있다. 그 단계의 범위로 잡는다
+    const s = tr.steps[i] as any;
+    if (!s) return;
+    let a: number | null = null;
+    let b: number | null = null;
+    if (typeof s.from === 'number' && typeof s.to === 'number') [a, b] = [s.from, s.to];
+    else if (typeof s.pos === 'number') [a, b] = [s.pos, s.pos + 1];
+    if (a == null || b == null) return;
+    const after = tr.mapping.slice(i);
+    f = Math.min(f, after.map(a, -1));
+    t = Math.max(t, after.map(b, 1));
   });
   return f <= t ? [f, t] : null;
 }
