@@ -17,7 +17,8 @@
     "dist:same": "npm run build && electron-builder --win",
     "version:minor": "node scripts/bump-version.mjs minor",
     "version:major": "node scripts/bump-version.mjs major",
-    "dist:store": "npm run build && electron-builder --win appx"
+    "dist:store": "npm run build && electron-builder --win appx",
+    "dist:msix": "npm run build && node scripts/pack-msix.mjs --build"
   },
   "build": {
     "appId": "kr.smic.kite",
