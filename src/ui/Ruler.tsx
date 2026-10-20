@@ -36,6 +36,10 @@ export function Ruler() {
 
   const g = tab ? computeGeom(tab.settings) : null;
   const z = app.zoom;
+  // 글을 쓰는 영역 (화면 px, 쪽 왼쪽 기준): 표 칸 안이면 그 칸의 안쪽, 아니면 쪽의 본문
+  const cell = tab && g ? cellArea(tab) : null;
+  const areaX = cell ? cell.x : g ? g.ml * z : 0;
+  const areaW = cell ? cell.w : g ? g.contentW * z : 0;
 
   useEffect(() => {
     const c = canvasRef.current;
@@ -51,17 +55,18 @@ export function Ruler() {
     ctx.fillStyle = '#d9dde3';
     ctx.fillRect(0, 3, w, 16);
     ctx.fillStyle = '#ffffff';
-    ctx.fillRect(g.ml * z, 3, g.contentW * z, 16);
+    ctx.fillRect(areaX, 3, areaW, 16);
     ctx.strokeStyle = '#7b8494';
     ctx.fillStyle = '#4b5361';
     ctx.font = '9px sans-serif';
     ctx.textAlign = 'center';
     const mm = PX_PER_MM * z;
-    const startMm = -g.ml / PX_PER_MM;
-    const endMm = (g.W - g.ml) / PX_PER_MM;
+    // 눈금의 0 은 글 영역의 왼쪽 끝
+    const startMm = -areaX / mm;
+    const endMm = (w - areaX) / mm;
     ctx.beginPath();
     for (let m = Math.ceil(startMm); m <= endMm; m++) {
-      const x = g.ml * z + m * mm + 0.5;
+      const x = areaX + m * mm + 0.5;
       let h = 2;
       if (m % 10 === 0) h = 7;
       else if (m % 5 === 0) h = 4;
@@ -79,10 +84,9 @@ export function Ruler() {
   const left = isPara ? p.attrs.indentLeft || 0 : 0;
   const first = isPara ? p.attrs.textIndent || 0 : 0;
   const right = isPara ? p.attrs.indentRight || 0 : 0;
-  const base = g.ml * z;
-  const xLeft = base + left * PT_TO_PX * z;
-  const xFirst = base + (left + first) * PT_TO_PX * z;
-  const xRight = base + (g.contentW - right * PT_TO_PX) * z;
+  const xLeft = areaX + left * PT_TO_PX * z;
+  const xFirst = areaX + (left + first) * PT_TO_PX * z;
+  const xRight = areaX + areaW - right * PT_TO_PX * z;
 
   const startDrag = (kind: 'first' | 'left' | 'right') => (e: React.MouseEvent) => {
     e.preventDefault();
@@ -137,4 +141,29 @@ export function Ruler() {
       {drag && <div className="r-guide" style={{ left: drag.x }} />}
     </div>
   );
+}
+
+/** 커서가 표 칸 안에 있으면 그 칸의 글 영역 (화면 px, 쪽 왼쪽 기준: 칸 왼쪽 끝 + 안 여백 ~ 오른쪽 안 여백) */
+function cellArea(tab: NonNullable<ReturnType<typeof useApp>['active']>): { x: number; w: number } | null {
+  const { view, state } = tab.editor;
+  const $from = state.selection.$from;
+  let depth = -1;
+  for (let d = $from.depth; d > 0; d--) {
+    const n = $from.node(d).type.name;
+    if (n === 'tableCell' || n === 'tableHeader') {
+      depth = d;
+      break;
+    }
+  }
+  if (depth < 0) return null;
+  const dom = view.nodeDOM($from.before(depth)) as HTMLElement | null;
+  const stage = document.querySelector(`[data-doc="${tab.id}"] .stage`) as HTMLElement | null;
+  if (!dom || !stage || !(dom instanceof HTMLElement) || !dom.offsetWidth) return null;
+  const r = dom.getBoundingClientRect();
+  // 확대 배율이 걸려 있어도 맞도록 화면 폭과 레이아웃 폭의 비율로 안 여백·테두리를 환산한다
+  const s = r.width / dom.offsetWidth;
+  const cs = getComputedStyle(dom);
+  const l = (dom.clientLeft + parseFloat(cs.paddingLeft || '0')) * s;
+  const rt = (dom.offsetWidth - dom.clientLeft - dom.clientWidth + parseFloat(cs.paddingRight || '0')) * s;
+  return { x: r.left - stage.getBoundingClientRect().left + l, w: Math.max(0, r.width - l - rt) };
 }
