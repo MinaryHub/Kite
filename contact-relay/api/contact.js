@@ -28,7 +28,11 @@ function rateLimited(ip) {
 }
 
 export async function POST(request) {
-  const { BREVO_API_KEY, CONTACT_TO, CONTACT_SENDER } = process.env;
+  // 붙여 넣을 때 섞인 앞뒤 공백·줄바꿈·따옴표는 지운다
+  const clean = (v) => (v || '').trim().replace(/^['"]|['"]$/g, '').trim();
+  const BREVO_API_KEY = clean(process.env.BREVO_API_KEY);
+  const CONTACT_TO = clean(process.env.CONTACT_TO);
+  const CONTACT_SENDER = clean(process.env.CONTACT_SENDER);
   if (!BREVO_API_KEY || !CONTACT_TO || !CONTACT_SENDER) return json({ ok: false, error: '문의 서버 설정이 끝나지 않았습니다.' }, 503);
   if (!(request.headers.get('content-type') || '').includes('application/json')) return json({ ok: false, error: '형식이 올바르지 않습니다.' }, 415);
   const ip = (request.headers.get('x-forwarded-for') || '').split(',')[0].trim() || 'unknown';

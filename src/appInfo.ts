@@ -7,7 +7,7 @@
  *   메일 주소는 앱 안에 두지 않는다: 문의는 양식 서비스를 거쳐 등록된 메일로 전달된다
  * - PRIVACY_URL: 개인정보 처리방침을 올린 웹 주소 (PRIVACY.md 내용). 비어 있으면 앱 안의 내용을 보여 준다
  */
-export const CONTACT_FORM_ENDPOINT = '';
+export const CONTACT_FORM_ENDPOINT = 'https://kite-contact-relay.vercel.app/api/contact';
 export const CONTACT_FORM_KEY = '';
 export const PRIVACY_URL = '';
 
