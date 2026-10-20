@@ -6,6 +6,7 @@ import { execFile } from 'node:child_process';
 import { initMcpHost, isMcpBridge, runMcpBridge } from './mcp';
 import { setupCollab } from './collab';
 import { STORE_BUILD } from './flags';
+import { setupSupport } from './support';
 import { listPrivateFonts, readPrivateFont } from './fonts';
 
 /** AI 앱이 실행한 MCP 다리(Kite.exe --mcp): 창 없이 표준 입출력으로만 동작한다 */
@@ -294,6 +295,7 @@ app.whenReady().then(() => {
   createWindow();
   initMcpHost(() => mainWindow);
   setupCollab();
+  setupSupport();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

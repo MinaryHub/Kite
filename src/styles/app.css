@@ -2598,3 +2598,17 @@ input[type='number'] {
   padding: 8px;
   border-radius: 6px;
 }
+
+/* 문의 창 */
+.contact-msg {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 10px;
+  padding: 8px;
+  border: 1px solid var(--c-border-strong);
+  border-radius: 6px;
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  resize: vertical;
+}

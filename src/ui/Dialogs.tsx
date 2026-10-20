@@ -23,12 +23,13 @@ import { MathDialog } from './dialogs/MathDialog';
 import { CollabDialog } from './dialogs/CollabDialog';
 import { TemplateDialog } from './dialogs/TemplateDialog';
 import { LegalDialog } from './dialogs/LegalDialog';
+import { ContactDialog } from './dialogs/ContactDialog';
 
 export function Dialogs() {
   const app = useApp();
   const d = app.dialog;
   const close = () => app.closeDialog();
-  const needsDoc = d && !['prefs', 'shortcuts', 'about', 'mcp', 'collab', 'template', 'legal'].includes(d.type);
+  const needsDoc = d && !['prefs', 'shortcuts', 'about', 'mcp', 'collab', 'template', 'legal', 'contact'].includes(d.type);
   let el: JSX.Element | null = null;
   if (d && (!needsDoc || app.active)) {
     switch (d.type) {
@@ -88,6 +89,9 @@ export function Dialogs() {
         break;
       case 'math':
         el = <MathDialog onClose={close} pos={d.props?.pos ?? null} latex={d.props?.latex || ''} hwp={d.props?.hwp || ''} />;
+        break;
+      case 'contact':
+        el = <ContactDialog onClose={close} category={d.props?.category} message={d.props?.message} />;
         break;
       case 'legal':
         el = <LegalDialog onClose={close} kind={d.props?.kind === 'licenses' ? 'licenses' : 'privacy'} />;

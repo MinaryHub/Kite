@@ -9,6 +9,7 @@ import { sniffImageSize } from '../formats/imageUtil';
 import { computeGeom } from '../print';
 import * as review from './review';
 import * as collab from '../collab/session';
+import { openSponsor, openContact, contactAvailable } from '../support';
 
 export interface Command {
   label: string;
@@ -476,6 +477,8 @@ export const commands: Record<string, Command> = {
   'tools.shortcuts': { label: '단축키 목록', icon: 'Keyboard', shortcut: 'Shift+F1', keys: ['Shift+F1'], run: () => app.openDialog('shortcuts') },
   'tools.mcp': { label: 'AI 앱 연결 (MCP)...', icon: 'Plug', run: () => app.openDialog('mcp') },
   'tools.about': { label: 'Kite 정보', icon: 'Info', run: () => app.openDialog('about') },
+  'tools.sponsor': { label: '후원하기 (GitHub Sponsors)', icon: 'Heart', run: () => openSponsor() },
+  'tools.contact': { label: '문의하기...', icon: 'Mail', run: () => openContact(), enabled: () => contactAvailable() },
   'tools.privacyPolicy': { label: '개인정보 처리방침', icon: 'ShieldCheck', run: () => app.openDialog('legal', { kind: 'privacy' }) },
   'tools.licenses': { label: '오픈소스 라이선스', icon: 'FileText', run: () => app.openDialog('legal', { kind: 'licenses' }) },
   'tools.palette': { label: '명령 찾기', icon: 'Command', shortcut: 'Ctrl+Shift+P', keys: ['Ctrl+Shift+P'], run: () => app.set({ paletteOpen: true }) },

@@ -20,14 +20,14 @@ Kite는 사용자가 아래 기능을 직접 실행할 때만 정보를 외부�
 - Ollama 로컬 모델: 위 내용을 사용자의 컴퓨터 또는 사용자가 지정한 Ollama 서버로 보냅니다.
 - AI 앱 연결(MCP): AI 앱이 요청한 문서 내용을 사용자가 허용한, 같은 컴퓨터의 AI 앱으로 보냅니다.
 - 실시간 공동 편집(실험): 공유한 문서의 내용, 커서 위치, 사용자 이름을 접속 코드를 받은 같은 네트워크의 참가자에게 보냅니다. 이 통신은 접속 코드로 보호되지만 암호화되지 않으므로 신뢰할 수 있는 네트워크에서만 쓰세요.
-- AI 응답 신고: 신고한 AI 응답 글과 AI 회사·모델 이름을 사용자가 메일로 직접 개발사에 보냅니다.
+- 문의하기, AI 응답 신고: 사용자가 적은 내용, (적은 경우) 답장 받을 메일 주소, (선택) 앱 버전·운영체제, 신고한 AI 응답 글을 문의 양식 전달 서비스를 거쳐 개발사로 보냅니다. 이 내용과 메일 주소는 답변에만 씁니다.
 개인정보가 담긴 문서는 보내기 전에 "도구 → 개인정보 찾기·가림"으로 가리거나 Ollama를 쓰는 것을 권합니다.
 
 4. 아동의 개인정보
 Kite는 개인정보를 수집하지 않으므로 아동의 개인정보도 수집하지 않습니다.
 
 5. 문의
-이 방침에 대한 문의: [문의 이메일]
+이 방침에 대한 문의: Kite 의 "도구 → 문의하기"로 보내 주세요.
 방침이 바뀌면 이 문서와 앱 안의 내용을 함께 고칩니다.
 
 ------------------------------------------------------------
@@ -49,12 +49,12 @@ Kite sends information only when you use the following features yourself:
 - Ollama local models: the same content is sent to your own computer or to the Ollama server you specify.
 - AI app connection (MCP): document content requested by an AI app you have allowed, running on the same computer.
 - Real-time co-editing (experimental): the shared document content, cursor position and your display name are sent to participants on the same network who have the access code. This traffic is protected by the access code but is not encrypted; use it only on trusted networks.
-- Reporting an AI response: you send the reported AI response and the provider/model name to us by email yourself.
+- Contact and AI response reports: the message you write, your reply email address (if you provide one), optionally the app version and OS, and the reported AI response are sent to us through a form-forwarding service. We use them only to reply.
 For documents that contain personal information, we recommend masking it first with Tools > Find & Mask Personal Information, or using Ollama.
 
 4. Children's privacy
 Kite does not collect personal information, including that of children.
 
 5. Contact
-Questions about this policy: [contact email]
+Questions about this policy: use Tools > Contact (문의하기) in Kite.
 If this policy changes, we will update this text and the copy in the app.

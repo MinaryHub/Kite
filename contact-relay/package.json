@@ -1,0 +1,7 @@
+{
+  "name": "kite-contact-relay",
+  "private": true,
+  "type": "module",
+  "description": "Kite 문의 창 → Brevo 메일 중계 (Vercel 함수)",
+  "engines": { "node": ">=20" }
+}

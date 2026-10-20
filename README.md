@@ -84,7 +84,7 @@ npm run dist:store      # 윈도우에서만: electron-builder 의 makeappx 로 
 제출 전에 채울 값:
 
 - `package.json` → `build.appx` 의 식별 값은 Partner Center 값(minary.KiteWord, 게시자 minary)으로 넣어 두었다. `displayName` 은 Partner Center 에 예약한 앱 이름과 같아야 한다
-- `src/appInfo.ts` → `SUPPORT_EMAIL`(AI 응답 신고·문의 주소), `PRIVACY_URL`(아래 처리방침을 올린 웹 주소)
+- `src/appInfo.ts` → `CONTACT_FORM_ENDPOINT` 또는 `CONTACT_FORM_KEY`(문의 양식), `PRIVACY_URL`(아래 처리방침을 올린 웹 주소)
 - `PRIVACY.md` 의 문의처. 이 내용을 웹에 올리고 그 주소를 Partner Center 의 개인정보 처리방침 칸에도 넣는다
 
 스토어판에서 달라지는 점 (MSIX 로 설치되면 자동, 시험할 때는 `KITE_STORE=1`):
@@ -96,6 +96,11 @@ npm run dist:store      # 윈도우에서만: electron-builder 의 makeappx 로 
 모든 판에 공통으로, 클라우드 AI 로 처음 보낼 때 동의를 받고, AI 응답마다 신고 단추가 있으며, 도구 메뉴에서 개인정보 처리방침과 오픈소스 라이선스(`npm run build` 때 `scripts/gen-notices.mjs` 가 만든다)를 볼 수 있다.
 
 본 제품은 한글과컴퓨터의 한/글 문서 파일(.hwp) 공개 문서를 참고하여 개발하였습니다.
+
+## 후원·문의
+
+- 후원: 도구 → 후원하기 또는 정보 창의 "후원하기" → GitHub Sponsors(https://github.com/sponsors/knoxxr). 저장소의 `.github/FUNDING.yml` 이 GitHub 의 Sponsor 단추를 만든다 (저장소가 공개일 때)
+- 문의: 도구 → 문의하기. 앱 안 문의 창의 내용을 주 프로세스가 문의 양식 서비스(Formspree 또는 Web3Forms)로 보내고, 서비스가 등록된 메일로 전달한다. 개발사 메일 주소는 앱에 들어가지 않는다. `src/appInfo.ts` 의 `CONTACT_FORM_ENDPOINT`(Brevo 중계 `contact-relay/` 의 배포 주소 또는 Formspree) 또는 `CONTACT_FORM_KEY`(Web3Forms)를 채워야 켜진다. AI 응답 신고도 이 창으로 보낸다
 
 ## 구조
 

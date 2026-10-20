@@ -11,6 +11,8 @@ import { baseName } from '../../formats/common';
 import { SAVE_FORMATS } from '../../formats';
 import { refreshAuthor } from '../../app/review';
 import { HWP_NOTICE } from '../../appInfo';
+import { openSponsor, openContact, contactAvailable } from '../../support';
+import { Icon } from '../Icon';
 import type { SaveFormatId } from '../../types';
 
 export function TableDialog({ onClose }: { onClose: () => void }) {
@@ -560,6 +562,15 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
         </button>
         <button className="btn small" onClick={() => app.openDialog('legal', { kind: 'licenses' })}>
           오픈소스 라이선스
+        </button>
+        <span style={{ flex: 1 }} />
+        {contactAvailable() && (
+          <button className="btn small" onClick={() => (app.closeDialog(), openContact())}>
+            <Icon name="Mail" size={12} /> 문의
+          </button>
+        )}
+        <button className="btn small" onClick={() => openSponsor()}>
+          <Icon name="Heart" size={12} color="#e0457b" /> 후원하기
         </button>
       </div>
       {app.active?.path && <div className="unit">현재 문서: {baseName(app.active.path)}</div>}
