@@ -1,0 +1,59 @@
+name: Release
+
+# Push a tag like v1.0.2 to build the Windows installer and the Store package
+# and publish a GitHub Release. The version comes from the tag.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Set version from tag
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}".TrimStart('v')
+          npm version $v --no-git-tag-version --allow-same-version
+
+      - run: npm run build
+
+      # Partner Center identity is in package.json build.appx; repository
+      # Variables override it, as in msix.yml.
+      - name: Package (NSIS installer + appx)
+        shell: pwsh
+        run: |
+          $ebArgs = @('--win', 'nsis', 'appx', '--x64', '--publish', 'never')
+          if ($env:IDN) { $ebArgs += "-c.appx.identityName=$env:IDN" }
+          if ($env:PUB) { $ebArgs += "-c.appx.publisher=$env:PUB" }
+          if ($env:PDN) { $ebArgs += "-c.appx.publisherDisplayName=$env:PDN" }
+          npx electron-builder @ebArgs
+        env:
+          IDN: ${{ vars.APPX_IDENTITY_NAME }}
+          PUB: ${{ vars.APPX_PUBLISHER }}
+          PDN: ${{ vars.APPX_PUBLISHER_DISPLAY_NAME }}
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $files = Get-ChildItem release -File |
+            Where-Object { $_.Extension -in '.exe', '.appx' -and -not $_.Name.StartsWith('__') } |
+            ForEach-Object { $_.FullName }
+          if (-not $files) { Write-Error "No installer in release/"; exit 1 }
+          gh release create "${{ github.ref_name }}" @files `
+            --repo "${{ github.repository }}" `
+            --title "Kite ${{ github.ref_name }}" `
+            --generate-notes
