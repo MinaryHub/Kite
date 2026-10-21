@@ -1276,9 +1276,53 @@ input[type='number'] {
   justify-content: center;
   transform-origin: top center;
 }
+/* 한 쪽씩: 세로로 한 줄 */
+.preview-modal .pv-pages.one {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: center;
+}
+.preview-modal .pv-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+}
+.preview-modal .pv-label {
+  height: 22px;
+  line-height: 22px;
+  font-size: 12px;
+  color: #e6e8ec;
+  /* 배율(zoom)과 상관없이 같은 크기로 */
+  zoom: calc(1 / var(--pv-zoom, 1));
+}
 .preview-modal .print-page {
   box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
   flex-shrink: 0;
+}
+.preview-modal .pv-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.preview-modal .pv-title {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.preview-modal .pv-pageno {
+  width: 44px;
+  height: 26px;
+  text-align: center;
+  border: 1px solid var(--c-border-strong);
+  border-radius: 4px;
+  background: var(--c-surface);
+  color: inherit;
+}
+.preview-modal .pv-zoom {
+  width: 44px;
+  text-align: center;
 }
 .print-page {
   --k-transparent-line: transparent;
