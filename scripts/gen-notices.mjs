@@ -37,7 +37,7 @@ const entries = [...seen.entries()]
   .filter((e) => e.name && e.name !== pkg.name)
   .sort((a, b) => a.name.localeCompare(b.name));
 
-let out = `Kite 워드프로세서 — 오픈소스 라이선스 고지\n\n이 프로그램은 아래 오픈소스 소프트웨어를 포함합니다. 각 소프트웨어는 해당 라이선스를 따릅니다.\n\n`;
+let out = `Kite Word — 오픈소스 라이선스 고지\n\n이 프로그램은 아래 오픈소스 소프트웨어를 포함합니다. 각 소프트웨어는 해당 라이선스를 따릅니다.\n\n`;
 const counts = {};
 for (const e of entries) counts[e.license] = (counts[e.license] || 0) + 1;
 out += Object.entries(counts).map(([k, v]) => `  ${k}: ${v}`).join('\n') + '\n\n';

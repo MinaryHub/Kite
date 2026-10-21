@@ -538,7 +538,7 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
       <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
         <img src="./icon.svg" alt="" style={{ width: 56, height: 56 }} />
         <div>
-          <div style={{ fontSize: 16, fontWeight: 700 }}>Kite 워드프로세서</div>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>Kite Word</div>
           <div className="unit">
             버전 {version || '개발판'} · {buildDate()} 빌드
           </div>
