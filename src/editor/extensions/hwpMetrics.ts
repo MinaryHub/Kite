@@ -65,10 +65,29 @@ function langOf(cp: number): Lang | null {
   return 'sym';
 }
 
-/** 한 텍스트 노드의 폭 보정: 언어별 글꼴이 다른 곳에서 나눈 조각마다 글꼴과 letter-spacing */
-function decosFor(node: PMNode, pos: number, parent: PMNode, out: Decoration[]) {
+/** 글자 조각 하나: 한글 방식의 폭(px)과 그 폭을 내는 letter-spacing·word-spacing */
+interface Piece {
+  from: number;
+  to: number;
+  ls: number;
+  ws: number;
+  /** 빈칸이 아닌 글자 수, 빈칸 수 */
+  n: number;
+  spaces: number;
+  width: number;
+  /** 바탕 글꼴과 다른 언어 글꼴 (font-family 를 입힌다) */
+  font: string | null;
+  /** 줄 끝 빈칸: 폭 0 으로 (한글은 줄 끝 빈칸을 줄 폭에 넣지 않는다) */
+  hang?: boolean;
+}
+
+/**
+ * 한 텍스트 노드의 폭 보정: 언어별 글꼴이 다른 곳과 cuts(문서 위치)에서 나눈 조각마다 한글 폭과 letter-spacing.
+ * 폭을 잴 수 없는 글자 묶음(탭·위첨자 등)이면 null
+ */
+function piecesFor(node: PMNode, pos: number, parent: PMNode, cuts: number[]): Piece[] | null {
   const text = node.text || '';
-  if (!text || text.includes('\t')) return;
+  if (!text || text.includes('\t')) return null;
   let ts: Record<string, any> | null = null;
   let bold = false;
   let italic = false;
@@ -77,11 +96,11 @@ function decosFor(node: PMNode, pos: number, parent: PMNode, out: Decoration[]) 
     if (n === 'textStyle') ts = m.attrs;
     else if (n === 'bold') bold = true;
     else if (n === 'italic') italic = true;
-    else if (n === 'superscript' || n === 'subscript' || n === 'tab') return;
+    else if (n === 'superscript' || n === 'subscript' || n === 'tab') return null;
   }
   // 제목 문단처럼 글자 크기를 문단 모양이 정하는 경우는 잴 수 없으므로 건드리지 않는다
   const sizePt = +(ts?.fontSize || parent.attrs?.fontSize || (parent.type.name === 'heading' ? 0 : DEFAULT_FONT_SIZE));
-  if (!(sizePt > 0)) return;
+  if (!(sizePt > 0)) return null;
   const family = String(ts?.fontFamily || DEFAULT_FONT);
   const lf: Record<string, string> = ts?.langFonts && typeof ts.langFonts === 'object' ? ts.langFonts : {};
   const ratio = Math.max(50, Math.min(200, +(ts?.fontWidth || 100)));
@@ -89,18 +108,20 @@ function decosFor(node: PMNode, pos: number, parent: PMNode, out: Decoration[]) 
   const f = (ratio / 100) * (1 + spacing / 100);
   const sizePx = sizePt * PT2PX;
 
-  // 글꼴이 같은 글자끼리 조각으로 (빈칸은 앞 조각에 붙인다)
+  // 글꼴이 같은 글자끼리 조각으로 (빈칸은 앞 조각에 붙인다). cuts 에서는 늘 끊는다
   const segs: { from: number; to: number; font: string }[] = [];
+  const cutSet = new Set(cuts.map((c) => c - pos));
   let i = 0;
   for (const ch of text) {
     const lang = langOf(ch.codePointAt(0)!);
     const font = lang && lang !== 'base' && typeof lf[lang] === 'string' ? lf[lang] : lang ? family : null;
     const last = segs[segs.length - 1];
-    if (last && (font == null || font === last.font)) last.to = i + ch.length;
-    else segs.push({ from: i, to: i + ch.length, font: font ?? family });
+    if (last && !cutSet.has(i) && (font == null || font === last.font)) last.to = i + ch.length;
+    else segs.push({ from: i, to: i + ch.length, font: font ?? last?.font ?? family });
     i += ch.length;
   }
-  segs.forEach((s, k) => {
+  const out: Piece[] = [];
+  for (const s of segs) {
     const part = text.slice(s.from, s.to);
     const other = s.font !== family;
     const weight = bold ? 'bold' : fontWeightFallback(s.font) || 'normal';
@@ -115,26 +136,84 @@ function decosFor(node: PMNode, pos: number, parent: PMNode, out: Decoration[]) 
     const n = Array.from(glyphs).length;
     let ls = 0;
     let ws = 0;
-    if (n && (f !== 1 || plainFont !== canvasFont)) {
+    let gw = 0;
+    if (n) {
       const wb = measure(canvasFont, glyphs);
       const wp = plainFont === canvasFont ? wb : measure(plainFont, glyphs);
-      if (wb == null || wp == null) return;
+      if (wb == null || wp == null) return null;
       // 한글 폭: 글자마다 (보통 굵기의) 글꼴 폭 × 장평 × (1 + 자간)
-      ls = (f * wp - wb) / n;
+      gw = f * wp;
+      ls = (gw - wb) / n;
     }
     if (spaces) {
       const sb = spaceWidth(canvasFont);
-      if (sb == null) return;
+      if (sb == null) return null;
       // 빈칸은 글꼴과 상관없이 글자 크기의 절반 × 장평 × (1 + 자간)
       ws = f * (sizePx / 2) - sb - ls;
     }
     if (!isFinite(ls)) ls = 0;
     if (!isFinite(ws)) ws = 0;
-    if (Math.abs(ls) < 0.005 && Math.abs(ws) < 0.005 && !other) return;
-    const style = `letter-spacing: ${ls.toFixed(3)}px` + (spaces ? `; word-spacing: ${ws.toFixed(3)}px` : '') + (other ? `; font-family: ${fontStack(s.font)}` : '');
-    // 앞뒤로 글자를 칠 때 꾸밈이 따라 늘어나게 (조각 사이에서는 앞 조각만)
-    out.push(Decoration.inline(pos + s.from, pos + s.to, { style }, { inclusiveStart: k === 0, inclusiveEnd: true }));
-  });
+    out.push({ from: pos + s.from, to: pos + s.to, ls, ws, n, spaces, width: gw + spaces * f * (sizePx / 2), font: other ? s.font : null });
+  }
+  return out;
+}
+
+function pieceDeco(p: Piece, first: boolean): Decoration | null {
+  if (Math.abs(p.ls) < 0.005 && Math.abs(p.ws) < 0.005 && !p.font) return null;
+  const style = `letter-spacing: ${p.ls.toFixed(3)}px` + (p.spaces ? `; word-spacing: ${p.ws.toFixed(3)}px` : '') + (p.font ? `; font-family: ${fontStack(p.font)}` : '');
+  // 앞뒤로 글자를 칠 때 꾸밈이 따라 늘어나게 (조각 사이에서는 앞 조각만)
+  return Decoration.inline(p.from, p.to, { style }, { inclusiveStart: first, inclusiveEnd: true });
+}
+
+/** 줄 바꿈 표시 (한글이 줄을 바꾼 자리) */
+function lineBreakWidget(): HTMLElement {
+  const br = document.createElement('br');
+  br.className = 'hwp-lb';
+  return br;
+}
+
+/**
+ * 한글이 배치해 둔 줄(hwpLines)대로 줄을 바꾼다: 문단은 저절로 줄을 바꾸지 않게 하고(white-space: pre) 줄 첫 자리마다
+ * 줄 바꿈을 넣는다. 한글 글꼴이 없어 대신 그린 글꼴의 폭이 달라도 줄이 한글 폭에 맞도록, 넘치는 줄은 글자 사이를
+ * 좁히고 양쪽 정렬 줄은 빈칸을 넓혀 한글의 줄 폭에 맞춘다.
+ */
+function lineDecos(node: PMNode, pos: number, pieces: Piece[] | null, out: Decoration[]): boolean {
+  const lines = node.attrs?.hwpLines as [number, number][] | null;
+  if (!Array.isArray(lines) || !lines.length || node.attrs?.hwpLen !== node.content.size) return false;
+  const start = pos + 1;
+  const align = node.attrs?.textAlign || 'justify';
+  for (let k = 0; k < lines.length; k++) {
+    const a = start + lines[k][0];
+    const b = k + 1 < lines.length ? start + lines[k + 1][0] : start + node.content.size;
+    const before = a > start ? node.childBefore(lines[k][0]).node : null;
+    if (k > 0 && !(before && before.type.name === 'hardBreak')) out.push(Decoration.widget(a, lineBreakWidget, { side: -1, key: 'hwp-lb', ignoreSelection: true }));
+    if (!pieces) continue;
+    const ps = pieces.filter((p) => p.from >= a && p.to <= b && !p.hang);
+    if (!ps.length) continue;
+    const w = ps.reduce((s, p) => s + p.width, 0);
+    const chars = ps.reduce((s, p) => s + p.n + p.spaces, 0);
+    const sp = ps.reduce((s, p) => s + p.spaces, 0);
+    const target = lines[k][1];
+    if (!(target > 0) || !chars) continue;
+    // 문단 끝 줄과 줄 바꿈(Shift+Enter) 앞 줄은 양쪽 정렬하지 않는다
+    const last = k === lines.length - 1 || node.childBefore(b - start).node?.type.name === 'hardBreak';
+    if (w > target) {
+      const e = (target - w) / chars;
+      for (const p of ps) p.ls += e;
+    } else if (align === 'distribute' && chars > 1) {
+      const e = (target - w) / chars;
+      for (const p of ps) p.ls += e;
+    } else if (align === 'justify' && !last && sp) {
+      const e = (target - w) / sp;
+      for (const p of ps) p.ws += e;
+    }
+  }
+  if (pieces) for (const p of pieces) if (p.hang) {
+    // 줄 끝 빈칸은 폭 0 (가운데·오른쪽 정렬이 한글처럼 글자 끝에 맞도록)
+    p.ws -= p.width / Math.max(1, p.spaces);
+  }
+  out.push(Decoration.node(pos, pos + node.nodeSize, { style: 'white-space: pre' }));
+  return true;
 }
 
 /** from~to 에 걸친 글 덩어리(textblock)들의 보정 */
@@ -148,13 +227,49 @@ function decosIn(doc: PMNode, from: number, to: number, out: Decoration[]) {
       return true;
     }
     if (!node.isTextblock) return true;
+    // 한글 줄 자리: 줄 첫 자리와 줄 끝 빈칸의 시작에서 조각을 끊는다
+    const lines = node.attrs?.hwpLines as [number, number][] | null;
+    const useLines = Array.isArray(lines) && lines.length > 0 && node.attrs?.hwpLen === node.content.size;
+    const cuts: number[] = [];
+    const hangs: [number, number][] = [];
+    if (useLines) {
+      for (let k = 0; k < lines.length; k++) {
+        const a = lines[k][0];
+        const b = k + 1 < lines.length ? lines[k + 1][0] : node.content.size;
+        const t = node.textBetween(a, b, '', '\n');
+        const trail = t.length - t.replace(/[  ]+$/, '').length;
+        cuts.push(pos + 1 + a);
+        // textBetween 은 글자 아닌 것(그림 등)을 빼므로 길이가 맞을 때만
+        if (trail && t.length === b - a) {
+          cuts.push(pos + 1 + b - trail);
+          hangs.push([pos + 1 + b - trail, pos + 1 + b]);
+        }
+      }
+    }
     let maxPt = 0;
+    // 글자 묶음마다의 조각. 폭을 모르는 것(그림·탭 등)이 끼면 줄 폭은 맞추지 않는다
+    const groups: Piece[][] = [];
+    let measurable = true;
     node.forEach((child, off) => {
-      if (!child.isText) return;
+      if (!child.isText) {
+        if (child.type.name !== 'hardBreak') measurable = false;
+        return;
+      }
       const ts = child.marks.find((m) => m.type.name === 'textStyle');
       maxPt = Math.max(maxPt, +(ts?.attrs.fontSize || node.attrs?.fontSize || DEFAULT_FONT_SIZE));
-      decosFor(child, pos + 1 + off, node, out);
+      const ps = piecesFor(child, pos + 1 + off, node, cuts);
+      if (ps) groups.push(ps);
+      else measurable = false;
     });
+    const all = groups.flat();
+    for (const p of all) p.hang = hangs.some(([a, b]) => p.from >= a && p.to <= b);
+    if (useLines) lineDecos(node, pos, measurable ? all : null, out);
+    // 앞뒤로 글자를 칠 때 꾸밈이 따라 늘어나게 (글자 묶음의 첫 조각만 앞으로)
+    for (const g of groups)
+      g.forEach((p, k) => {
+        const d = pieceDeco(p, k === 0);
+        if (d) out.push(d);
+      });
     // 줄 높이 = 문단에서 가장 큰 글자 크기 × 줄 간격 (한글처럼). 글자 묶음은 줄 높이에 관여하지 않으므로(hwp-metrics CSS)
     // 문단의 글자 크기(줄 높이의 기준)를 그 크기로 맞춘다
     if (node.type.name !== 'paragraph') return false;
@@ -200,6 +315,7 @@ function changedRange(tr: Transaction): [number, number] | null {
       f = Math.min(f, rest.map(ns, -1));
       t = Math.max(t, rest.map(ne, 1));
     });
+
     // 서식(자간·장평·글자 크기 등)이나 문단 속성만 바꾼 단계는 위치가 그대로라 맵이 비어 있다. 그 단계의 범위로 잡는다
     const s = tr.steps[i] as any;
     if (!s) return;

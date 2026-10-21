@@ -395,10 +395,13 @@ class HwpConverter {
     const pAttrs = paraAttrs(pp);
     if (bg && !pAttrs.paraBg) pAttrs.paraBg = bg;
     const blocks: JNode[] = [];
+    /** 쪽 나누기 없이 한글이 새 쪽에 놓은 문단 */
+    let hwpPage = false;
     if (!inSub) {
       // 쪽 세기: 쪽 나누기, 또는 한글이 배치해 둔 줄 정보(첫 줄의 세로 위치)가 되돌아가면 새 쪽 (첫 문단 앞은 세지 않는다)
       const seg = p.children.find((c) => c.tag === T.PARA_LINE_SEG);
       const vpos = seg && seg.data.length >= 8 ? i32(seg, 4) : null;
+      hwpPage = this.topParas > 0 && !(breakType & 0x05) && vpos != null && vpos < this.lastVpos;
       if (this.topParas++ > 0 && (breakType & 0x05 || (vpos != null && vpos < this.lastVpos))) this.page++;
       if (vpos != null) this.lastVpos = vpos;
       if (breakType & 0x05) blocks.push({ type: 'pageBreak' });
@@ -415,6 +418,12 @@ class HwpConverter {
       while (si + 1 < shapes.length && shapes[si + 1][0] <= pos) si++;
       return shapes[si][1];
     };
+
+    // 한글이 배치해 둔 줄: [줄 첫 글자 위치, 줄 폭(px)]. 화면에서 같은 자리에서 줄을 바꾸도록 문단에 넘긴다 (hwpMetrics)
+    const lineRec = p.children.find((c) => c.tag === T.PARA_LINE_SEG);
+    const lineSegs: [number, number][] = [];
+    if (lineRec) for (let o = 0; o + 36 <= lineRec.data.length; o += 36) lineSegs.push([u32(lineRec, o), hwpToPx(i32(lineRec, o + 28))]);
+    const lineAt = new Map<number, number>();
 
     let inline: JNode[] = [];
     let produced = false;
@@ -452,10 +461,14 @@ class HwpConverter {
       buf += ch;
     };
 
+    const inlineSize = () => inline.reduce((s, nd) => s + (nd.type === 'text' ? (nd.text || '').length : 1), 0) + buf.length;
+    const wantLines = new Set(lineSegs.map((s) => s[0]));
+
     if (textRec) {
       const n = textRec.data.length >> 1;
       let i = 0;
       while (i < n) {
+        if (wantLines.has(i)) lineAt.set(i, inlineSize());
         const c = u16(textRec, i * 2);
         if (c >= 32) {
           addChar(String.fromCharCode(c), i);
@@ -511,8 +524,15 @@ class HwpConverter {
       const id = ctrlIdOf(ctrls[ctrlIdx]);
       if (id === 'secd' || id === 'cold' || id === 'head' || id === 'foot' || id === 'pgnp') this.handleCtrl(ctrls[ctrlIdx], 0, inline);
     }
+    const lineSize = inline.length && !produced ? inlineSize() : 0;
     if (inline.length) flush();
     else if (!produced) blocks.push(paragraph({ ...pAttrs, fontSize }));
+    // 문단이 표 등으로 쪼개지지 않고 줄 위치를 모두 찾았을 때만
+    const paras = blocks.filter((b) => b.type !== 'pageBreak');
+    if (lineSize && paras.length === 1 && paras[0].type === 'paragraph' && lineSegs.every((s) => lineAt.has(s[0]))) {
+      paras[0].attrs = { ...paras[0].attrs, hwpLines: lineSegs.map((s) => [lineAt.get(s[0])!, Math.round(s[1] * 100) / 100]), hwpLen: lineSize };
+    }
+    if (hwpPage && paras[0] && (paras[0].type === 'paragraph' || paras[0].type === 'table')) paras[0].attrs = { ...paras[0].attrs, hwpPage: true };
     return blocks;
   }
 

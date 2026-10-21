@@ -135,6 +135,14 @@ export const ParagraphFormat = Extension.create({
             // normal: 한글은 글자 사이 어디서나 나누고 영어 낱말은 지킨다 (break-all 은 영어 낱말도 자른다)
             renderHTML: (attrs: Record<string, any>) => (attrs.breakChar ? { 'data-break': 'char', style: 'word-break: normal' } : {}),
           },
+          /**
+           * 한글(HWP)이 배치해 둔 줄: [줄 첫 글자의 문단 안 위치, 줄 폭(px)] 목록과 그때의 문단 내용 크기.
+           * 내용 크기가 그대로일 때만 hwpMetrics 가 같은 자리에서 줄을 바꾼다. 화면 전용이라 HTML 로는 나가지 않는다
+           */
+          hwpLines: { default: null, keepOnSplit: false, parseHTML: () => null, renderHTML: () => ({}) },
+          hwpLen: { default: null, keepOnSplit: false, parseHTML: () => null, renderHTML: () => ({}) },
+          /** 한글(HWP)에서 이 문단이 새 쪽의 맨 위에서 시작했다 (쪽 나누기가 그 자리에서 쪽을 넘긴다) */
+          hwpPage: { default: null, keepOnSplit: false, parseHTML: () => null, renderHTML: () => ({}) },
           paraBg: {
             default: null,
             parseHTML: (el: HTMLElement) => normColor(el.getAttribute('data-bg')),
