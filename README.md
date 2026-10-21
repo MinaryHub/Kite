@@ -1,4 +1,4 @@
-# Kite Word
+# Kite Writer
 
 한글(HWP/HWPX) 문서를 중심으로 Word·PDF·Markdown 문서까지 열어 편집하는 데스크톱 워드프로세서입니다.
 Electron + React + TypeScript + TipTap(ProseMirror) 기반이며, HWP/HWPX/DOCX 변환기는 외부 라이브러리 없이 직접 구현했습니다.

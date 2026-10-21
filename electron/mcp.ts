@@ -563,7 +563,7 @@ export async function runMcpBridge() {
     }
   };
 
-  const server = new Server({ name: 'kite', title: 'Kite Word', version: app.getVersion() }, { capabilities: { tools: {} } });
+  const server = new Server({ name: 'kite', title: 'Kite Writer', version: app.getVersion() }, { capabilities: { tools: {} } });
   server.oninitialized = () => {
     const info = server.getClientVersion();
     if (info?.name) clientName = String((info as any).title || info.name);
