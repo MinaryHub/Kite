@@ -1,0 +1,50 @@
+# GitHub 릴리스 만들기: v* 태그가 올라오면 윈도우 설치 파일을 만들어 릴리스에 붙인다.
+# 태그는 npm run release 가 버전을 올리며 붙인다. 이미 있는 태그로 다시 돌리려면 Actions → "릴리스" → Run workflow 에 태그를 넣는다.
+name: 릴리스
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '릴리스할 태그 (예: v1.0.3)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: 태그와 package.json 버전 맞는지 확인
+        shell: pwsh
+        run: |
+          $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ("v$v" -ne $env:TAG) { throw "태그 $env:TAG 와 package.json 버전 $v 이 다릅니다." }
+      - run: npm ci
+      - run: npm run build
+      - run: npx electron-builder --win nsis --x64 --publish never
+      - name: 릴리스 만들고 설치 파일 붙이기
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $files = Get-ChildItem release -File | Where-Object { $_.Name -like '*.exe' -or $_.Name -like '*.blockmap' -or $_.Name -eq 'latest.yml' } | ForEach-Object { $_.FullName }
+          if (-not $files) { throw 'release/ 에 설치 파일이 없습니다.' }
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG @files --clobber
+          } else {
+            gh release create $env:TAG @files --title "Kite $env:TAG" --generate-notes
+          }

@@ -10,9 +10,19 @@ npm install
 npm run dev        # 개발 모드 (Vite + Electron)
 npm run build      # 타입 검사 + 화면/메인 프로세스 빌드
 npm start          # 빌드 결과 실행
-npm run dist       # Windows 설치 파일(release/) 만들기
+npm run dist       # 버전 +1 후 Windows 설치 파일(release/) 만들기 (dist:same 은 버전 그대로)
 npm run dev:web    # 브라우저에서만 실행 (파일은 내려받기로 저장)
 ```
+
+## GitHub 릴리스
+
+```bash
+npm run release          # 패치 +1 → 커밋 → v<버전> 태그 → push
+npm run release:minor    # 1.0.3 → 1.1.0
+npm run release:major    # 1.1.0 → 2.0.0
+```
+
+태그가 올라가면 `.github/workflows/release.yml` 이 윈도우 실행기에서 설치 파일(`Kite Setup <버전>.exe`)을 만들어 GitHub 릴리스에 붙인다. 커밋하지 않은 변경이 있으면 멈춘다.
 
 ## 지원 형식
 
