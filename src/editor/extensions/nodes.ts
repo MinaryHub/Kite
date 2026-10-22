@@ -677,6 +677,8 @@ export const KTable = Table.extend({
           return v ? { 'data-out-margin': JSON.stringify(v) } : {};
         },
       },
+      /** 한글(HWP)에서 이 표가 새 쪽의 맨 위에서 시작했다 (쪽 나누기가 그 자리에서 쪽을 넘긴다). 화면 전용 */
+      hwpPage: { default: false, parseHTML: () => false, renderHTML: () => ({}) },
       borderless: {
         default: false,
         parseHTML: (el: HTMLElement) => el.getAttribute('data-borderless') === 'true',

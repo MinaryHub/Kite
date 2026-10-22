@@ -213,6 +213,8 @@ function computeLayout(
   let shift = 0;
   let fnUsed = 0;
   let forceNext = false;
+  /** 한글이 새 쪽에서 시작한 블록(hwpPage): 쪽 맨 위가 아니면 넘긴다 */
+  let softNext = false;
   let lastBottom = 0;
   /** 지금 배치하는 표의 되풀이할 제목 줄 (제목 줄 다음 줄들을 배치하는 동안만) */
   let tableHead: { table: number; h: number } | null = null;
@@ -299,7 +301,7 @@ function computeLayout(
     normalize(top);
     const pageTop = page * P;
     const overflow = bottom > limitFor(fnH) + 0.5 || top > pageTop + CH;
-    if ((forceNext || overflow) && (forceNext || top > pageTop + 0.5)) {
+    if ((forceNext || softNext || overflow) && (forceNext || top > pageTop + 0.5)) {
       const pos = getPos();
       if (pos != null) {
         const h = Math.round(((page + 1) * P - top) * 100) / 100;
@@ -315,6 +317,7 @@ function computeLayout(
       }
     }
     forceNext = false;
+    softNext = false;
     markPageStart(docPos);
     if (fnH > 0) fnUsed += fnH + (fnUsed === 0 ? FN_SEP : 0);
     if (bottom > page * P + CH + 0.5) {
@@ -631,6 +634,7 @@ function computeLayout(
       forceNext = true;
       return;
     }
+    softNext = !!child.attrs?.hwpPage;
     if (child.isTextblock) handleTextblock(child, pos);
     else if (name === 'table') handleTable(child, pos);
     else if (CONTAINERS.has(name)) walk(child, pos + 1);

@@ -1,7 +1,7 @@
 {
   "name": "kite",
   "productName": "Kite",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "HWP/HWPX/DOCX/DOC/PDF/MD 문서 편집기",
   "author": "SMIC",
   "license": "UNLICENSED",
@@ -17,8 +17,11 @@
     "dist:same": "npm run build && electron-builder --win",
     "version:minor": "node scripts/bump-version.mjs minor",
     "version:major": "node scripts/bump-version.mjs major",
-    "dist:store": "npm run build && electron-builder --win appx",
-    "dist:msix": "npm run build && node scripts/pack-msix.mjs --build"
+    "dist:store": "node scripts/bump-version.mjs && npm run build && electron-builder --win appx",
+    "dist:msix": "node scripts/bump-version.mjs && npm run build && node scripts/pack-msix.mjs --build",
+    "release": "node scripts/release.mjs",
+    "release:minor": "node scripts/release.mjs minor",
+    "release:major": "node scripts/release.mjs major"
   },
   "build": {
     "appId": "kr.smic.kite",
@@ -61,7 +64,7 @@
       "identityName": "minary.KiteWord",
       "publisher": "CN=C460CD23-2642-4BA2-A332-6F8ADBE54E1F",
       "publisherDisplayName": "minary",
-      "displayName": "Kite 워드프로세서",
+      "displayName": "Kite Writer",
       "applicationId": "Kite",
       "languages": [
         "ko-KR",

@@ -2,9 +2,16 @@ name: Release
 
 # Push a tag like v1.0.2 to build the Windows installer and the Store package
 # and publish a GitHub Release. The version comes from the tag.
+# npm run release bumps the version, tags it and pushes the tag.
+# To rebuild an existing tag: Actions → Release → Run workflow with the tag.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v1.0.3)'
+        required: true
 
 permissions:
   contents: write
@@ -13,8 +20,12 @@ jobs:
   windows:
     runs-on: windows-latest
     timeout-minutes: 40
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -24,7 +35,7 @@ jobs:
       - name: Set version from tag
         shell: pwsh
         run: |
-          $v = "${{ github.ref_name }}".TrimStart('v')
+          $v = $env:TAG.TrimStart('v')
           npm version $v --no-git-tag-version --allow-same-version
 
       - run: npm run build
@@ -53,7 +64,12 @@ jobs:
             Where-Object { $_.Extension -in '.exe', '.appx' -and -not $_.Name.StartsWith('__') } |
             ForEach-Object { $_.FullName }
           if (-not $files) { Write-Error "No installer in release/"; exit 1 }
-          gh release create "${{ github.ref_name }}" @files `
-            --repo "${{ github.repository }}" `
-            --title "Kite ${{ github.ref_name }}" `
-            --generate-notes
+          gh release view $env:TAG --repo "${{ github.repository }}" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG @files --repo "${{ github.repository }}" --clobber
+          } else {
+            gh release create $env:TAG @files `
+              --repo "${{ github.repository }}" `
+              --title "Kite $env:TAG" `
+              --generate-notes
+          }
